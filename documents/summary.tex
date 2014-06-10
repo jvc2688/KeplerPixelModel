@@ -1,0 +1,196 @@
+\documentclass[]{article}
+\usepackage{amsmath}
+\usepackage[a4paper]{geometry}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage[colorlinks=false, pdfborder={0 0 0}]{hyperref}
+\usepackage{cleveref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+\begin{document}
+
+\title{Summary}
+\author{Dun Wang}
+\maketitle
+
+\section{Prevalence of Earth-size planets orbiting Sun-like stars}
+
+\subsection{Kepler objects of interst}
+After the vetting of criterion of photometric dimming SNR ratio, comparing with the theoretical models of transiting planets and rejection of EBs (eclipsing binary), there remains 602 eKOIs in the ctalog
+
+\subsection{Missed planets}
+
+\begin{enumerate}
+ \item Orbital planes are so tilted that it avoid dimming the star
+
+The probability that planet transits the star is $P_{T}=R_{*}/a$, where $R_{*}$ is the radius of the star, $a$ is the semimajor axis of the orbit \\
+
+ \item The signal of transits are not detected by TERRA
+
+The author applied synthetic planet-caused dimmings to Kepler photometry to determine the survey completeness in small bins of $(P,R_{P})$
+\end{enumerate}
+
+\subsection{Planet Occurrence}
+Considering the correction for planets missed caused by non-transiting orbital inclinations and by survey completeness, the author get the planet occurrence $f(P, R_{P})$ as function of planet size and orbital period and $f(F_{P},R_{P})$ as function of stellar light intensity incident on the planet and planet size
+
+Results:
+\begin{enumerate}
+ \item Detections of Earth-size planets having orbital periods of P=200-400d are expected to be rare
+ \item The prevalence of small planets as a function of logP is remarkably uniform, which can be extrapolated out to 400d
+ \item Using the definition of $F_{P}$ and Kepler's third law, $F_{P}$ is proportional to $P^{-4/3}$, uniform occurrence in $logF_{P}$translates to uniform occurrence in $logF_{P}$
+\end{enumerate}
+
+\subsection{Conclustions}
+\begin{enumerate}
+ \item With the correction of orbital tilt and detection completeness, $26\pm 3\%$ of Sun-like stars have an Earth-size planet with P=5-100 d
+ \item $11 \pm 4 \%$ of Sun-like stars harbour an Earth-size planet that receives nearly Earth levels of stellar energy
+ \item Small planets far outnumber large large ones
+ \item If $22\%$ occurrence rate of Earth-size planets in habitable zones of Sun-like stars, then the nearest such planet is expected to orbit a star that is less than 12 light-year from Earth
+\end{enumerate}
+
+\section{Maximizing Kepler science return per telemetered pixel}
+
+The paper introduces several data analysis methods which can potentially maximising the grain of the existing data from the Two-Wheel Kepler Mission.  The methods can be classified into two main categories: data-driven models and physically motivated generative models. In addition, it also provides some promising preliminary results of these methods.
+
+\subsection{Data-driven modeling}
+
+\subsubsection{Predicting pixels with pixels}
+
+This model can considered as an extension of PDC, which remove systematic effects from the time series in a single pixel using the fluxes of pixels from some $K \ge 1$ nearby stars and the "historical" time series of the target pixel, the method stand on two basic assumption:
+
+\begin{enumerate}
+  \item Independence: the true fluxes are independent : $f_{i}(t_{k})\perp f_{i'}(t_{k'})$
+  \item Joint confounding: the overall systematic affecting $y_{i}(t_{j})$ can be predicted from the other $y_{i'}(t_{j'})$
+\end{enumerate}
+
+If assume the systematic confounders affect the signal additively, the model can be written as:
+\begin{align*}
+y_{i}(t_{k})=f_{i}(t_{k})+ \sum_{i',k'} c_{i'k'}y_{i'}(t_{k'})
+\end{align*}
+where $ c_{i'k'}$ can be found by standard linear least-squares techniques and $f_{i}(t_{k})$ can be treated as the noise term.
+
+\subsubsection{Autoregressive generalization}
+Assumption: observations of the target of interest are independent of observations of other stars for times $t_{k'}$, where $\mid t_{k}-t_{k'} \mid > \Delta$, $\Delta$ is longer than the maximum duration of a transit.\\
+Stand on the independence assumption above we can preform an autoregressive fit to the data(by using not just pixels from other stars, but using pixels from time-window in past history of the current star), which can model both instrumental variations and stellar variations without messing up the transits
+
+\subsubsection{Deep learning}
+Convolutional neural network which is multi-layered can be applied to model the Kepler' data, which can be classified into:
+\begin{enumerate}
+ \item Spatial-only
+ \item Temporal-only 
+ \item Spatio-temporal
+\end{enumerate}
+
+\subsection{Physical modeling}
+
+\subsubsection{Toy simulation and modeling}
+Simulation:
+\begin{enumerate}
+ \item Drift and jitter were simulated by moving the bore-sight of the simulated telescope every 6 seconds during the integration
+ \item PSF is a very simplified double-Gaussian
+ \item flat-field is drawn pixel-wise iid from a Gaussian with 1 percent standard deviation
+\end{enumerate} 
+Modelling:
+\begin{enumerate}
+ \item Using a simple mixture of 4 Gaussians to model PSF
+ \item Fitting for the brightness of each source 
+ \item Flat-field is estimated by taking the geometric mean of the ratio of the model to simulated images
+\end{enumerate} 
+
+\subsubsection{Intrapixel flat-field}
+Simulation:
+\begin{enumerate}
+ \item Same process as the previous one except the resolution of the simulated images are doubled
+\end{enumerate} 
+Modelling:
+\begin{enumerate}
+ \item Using a simple mixture of 4 Gaussians to model PSF
+ \item Fitting for the brightness of each source 
+ \item Flat-field is estimated by taking the geometric mean of the ratio of the model to simulated images
+\end{enumerate} 
+Additional prior to avoid overfitting(regularization):
+\begin{enumerate}
+ \item The estimated flat-field should be with the same variance as distribution from which the true flat-field was drawn
+\end{enumerate} 
+Result:
+\begin{enumerate}
+ \item The quality of the intrapixel flat recovery is a strong function of the history of detector illumination, in which the quality is better where there is bright star and poor where there are less  illumination
+\end{enumerate} 
+
+\subsubsection{Photometry and modeling}
+\begin{enumerate}
+ \item  Using two component Gaussian PSF model
+ \item  Assuming jitter normally  distributed with a standard deviation of 1 arcsec
+ \item Noise was simulated by drawing iid from a Gaussian with a standard deviation of $150e^{-}$
+ \item knowledge of both the star positions from Kepler's Input Catalog and PSF
+\end{enumerate}
+Result:
+\begin{enumerate}
+ \item  The modelling approach is able to yield photometric information with a higher accuracy than aperture photometry in the nominal case
+ \item  While in the drift case, aperture photometry does not work
+\end{enumerate}
+
+\subsubsection{PSF modeling}
+PSF decomposed in two components:
+\begin{enumerate}
+ \item Kepler's system PSF, which is unchanged. This part of PSF can be modelled with the help of  analysis of the temporal stability of Kepler's PRF 
+ \item PSF from global motion/drift of the spacecraft during exposure, which can be constrained by the knowledge of the detector's geometry and its possibly time and space-varying PRF, all star images from an individual exposure.
+\end{enumerate}
+
+\subsection{Changes to operations}
+\begin{enumerate}
+ \item Exposure times should be shorter
+ \item More telemetry of pixels can provide more calibration information
+ \item Telemetry of housekeeping data helps recovery of pointing history
+ \item Do calibration observations if possible
+\end{enumerate}
+
+
+
+\section{A data-driven, pixel-level model to improve the precision of Kepler photometry}
+\subsection{Feature of PLM} 
+\begin{enumerate}
+  \item PLM works at pixel level, which can capture more fine-grained information variation of the spacecraft
+  \item Using parameterized mathematical function where predictions are built of linear combinations of data, while objective function is quadratic 
+  \item Using data that do not overlap target star pixels, which remove space craft variability rather than intrinsic stellar variability
+  \item Using train-and-test framework to avoid over-fitting
+  \item The models aren't interpretable
+\end{enumerate}
+
+\subsection{Train the model}
+Objective function:
+\begin{align*}
+\chi_{mn}^{2}=\sum_{n' \in N_{n}} \frac{[I_{mn'}-I_{mnn'}^{*}]^{2}}{\sigma _{mn'}^{2}}+ \sum_{m' \in M_{m}} \frac{a_{mnm'}^{2}}{\sum ^{2}} 
+\end{align*}
+where
+\begin{align*}
+I_{mnn'}^{*}=\sum_{m' \in M_{m}} a_{mnm'}I_{m'n'}+ \sum_{k=1}^{K} b_{mnk} d_{kn'} 
+\end{align*}
+$I_{mnn'}^{*}$ is the prediction for data point $I_{mn'}$ that used for data point $I_{mn}$\\
+The train data is from time set $N_n$ of time
+  indices $n'$ such that for all $n'\in N_n$,
+  $t_{n'}$ is in the same quarter as $t_n$,
+  and $|t_{n'} - t_n|>\Delta t$, and spatial set $M_{m}$ that is of pixels associated with Q=5 closest stars than the star associated with pixel m\\ 
+\\
+The training process is to minimise the objective function by choosing the full set of parameters $a_{mnm'} and b_{mnk}$
+
+\subsection{Construct PLM pixels}
+the PLM pixel $J_{mn}$:
+\begin{align*}
+J_{mn} =\delta_{mn} + \bar{I}^{\ast}_m
+\end{align*}
+Where $\delta_{mn}$ is the residual from the mean predicted intensity  $\bar{I}^{\ast}_m=\frac{1}{N_m}\,\sum_n I^{\ast}_{mnn}$, which contains information of exoplanet transit and stellar variation
+
+\subsection{PLM photometry}
+The stellar flux estimates $S_{n}$:
+\begin{align*}
+S_n = \frac{1}{M}\,\sum_m w_m\,J_{mn}
+\end{align*}
+Where weights $w_m$ are the same as in the SAP photometry, and the sum is over all pixels associated with the target star
+
+
+\end{document}
