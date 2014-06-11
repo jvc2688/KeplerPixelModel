@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-Pixel-Plots
-===========
-=======
 Summary
 =======
 A summary of these three paper:
