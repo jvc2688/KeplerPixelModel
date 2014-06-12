@@ -12,9 +12,9 @@ koi = client.koi(282.02)
 originStar = koi.star
 originTpf = client.target_pixel_files(ktc_kepler_id=originStar.kepid, sci_data_quarter=qua)[0]
 
-# Find potential targets by Kepler magnitude
-starsOver = client.target_pixel_files(kic_kepmag=">=%f"%originStar.kic_kepmag, sci_data_quarter=qua, sort=("kic_kepmag", 1),ktc_target_type="LC", max_records=17)
-starsUnder = client.target_pixel_files(kic_kepmag="<=%f"%originStar.kic_kepmag, sci_data_quarter=qua, sort=("kic_kepmag", -1),ktc_target_type="LC", max_records=17)
+# Find potential targets by Kepler magnitude with the same quarter and ccd channel
+starsOver = client.target_pixel_files(kic_kepmag=">=%f"%originStar.kic_kepmag, sci_data_quarter=qua, sci_channel=originTpf.sci_channel, sort=("kic_kepmag", 1),ktc_target_type="LC", max_records=17)
+starsUnder = client.target_pixel_files(kic_kepmag="<=%f"%originStar.kic_kepmag, sci_data_quarter=qua, sci_channel=originTpf.sci_channel, sort=("kic_kepmag", -1),ktc_target_type="LC", max_records=17)
 
 stars = {}
 stars[originTpf.ktc_kepler_id] = originTpf
@@ -69,8 +69,7 @@ for key, tpf in stars.items():
 
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                     wspace=0, hspace=0)
-    plt.suptitle('Kepler %d Quarter %d\n Kepler magnitude %f'%(tpf.ktc_kepler_id, qua, tpf.kic_kepmag))
+    plt.suptitle('Kepler %d Quarter %d CCD Channel %d\n Kepler magnitude %f'%(tpf.ktc_kepler_id, qua, tpf.sci_channel, tpf.kic_kepmag))
     plt.savefig('%d-%d.png'%(tpf.ktc_kepler_id, qua))
     plt.clf()
-
 
