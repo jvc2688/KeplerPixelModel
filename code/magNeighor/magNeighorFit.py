@@ -72,17 +72,25 @@ neighorFluxMatrix = np.concatenate(neighorFluxes, axis=1)
 
 result  = np.linalg.lstsq(neighorFluxMatrix, targetFlux)
 
-f, axes = plt.subplots(2, 1)
+f, axes = plt.subplots(3, 1)
 
 axes[0].plot(time, targetFlux[:,10])
 plt.setp( axes[0].get_xticklabels(), visible=False)
 plt.setp( axes[0].get_yticklabels(), visible=False)
-axes[0].set_ylabel("flux of pixel(2,4)")
+axes[0].set_ylabel("flux of tpf")
 
-axes[1].plot(time, np.dot(neighorFluxMatrix, result[0])[:,10])
+fitFlux = np.dot(neighorFluxMatrix, result[0])
+axes[1].plot(time, fitFlux[:,10])
 plt.setp( axes[1].get_xticklabels(), visible=False)
 plt.setp( axes[1].get_yticklabels(), visible=False)
-axes[1].set_ylabel("fit flux of pixel(2,4)")
+axes[1].set_ylabel("flux of fit")
+
+axes[2].plot(time, np.divide(targetFlux[:,10], fitFlux[:,10]))
+#plt.setp( axes[2].get_xticklabels(), visible=False)
+#plt.setp( axes[2].get_yticklabels(), visible=False)
+axes[2].set_ylim(0.999,1.001)
+axes[2].set_xlabel("time")
+axes[2].set_ylabel("ratio of data and fit")
 
 plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                     wspace=0, hspace=0)
