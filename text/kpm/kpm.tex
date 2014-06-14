@@ -1,0 +1,70 @@
+\documentclass[]{article}
+\usepackage{amsmath}
+\usepackage[a4paper]{geometry}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage[colorlinks=false, pdfborder={0 0 0}]{hyperref}
+\usepackage{cleveref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+\begin{document}
+
+\title{Kepler Pixel Model}
+\author{Dun Wang}
+\maketitle
+
+\section{Target Selection}
+
+In this model, targets are restricted to some GK-type stars that has a Earth-radius planet. The definition of GK-type stars is stars with surface temperatures $T_{eff}=4100-6100K$ and gravities $\log g= 4.0-4.9$ ($\log g$ is the base 10 logarithm of a star’s surface gravity measured in cm $s^{-2}$) (1). I set the planetary radius to be 0.8-1.2 earth radii to make sure that the star has a Earth-radius planet. With the selection criteria described above, the Confirmed Exoplanet Archive(2) gives 56 potential targets and finally KIC 5088536 is chosen to be the target that will be used in this model\\
+Here is the basic information of the KIC 5088536 from the Exoplanet Archive:
+\begin{center}
+    \begin{tabular}{ |c| c | c | c |  p{5cm} |}
+    \hline
+    \multicolumn{4}{|c|}{Steller Information}\\
+    \hline
+    Effective Temperature & Stellar Radius & Surface Gravity & Kepler-band  Magnitude \\ \hline
+    5884 $\pm$ 75 [K] & 1.127 $\pm$ 0.033 [Solar radii] & 4.304 $\pm$0.053 [$cm/s^{2}$] & 11.529 [mags]\\ \hline
+    \end{tabular}
+\end{center}
+
+\section{Pixels Plot}
+For the target KIC 5088536, I plot the flux-time plot for the whole target pixel file of  quarter 5:\\
+\url{http://physics.nyu.edu/~dw1519/kepler/plot/5088536/tpf-5.png}\\
+and the associated pixel grid plot:\\
+\url{http://physics.nyu.edu/~dw1519/kepler/plot/5088536/5088536-5.png}
+
+\section{Neighors in Kepler magnitude}
+Using the kplr interface, I write code to find the neighors in terms of Kepler magnitude on the same CCD as the target and plot the pixel grid plot of the 16 closest stars(in Kepler magnitude)\\
+Here are all the plots:\\
+\url{http://physics.nyu.edu/~dw1519/kepler/plot/5088536/ccd25kmag16}
+
+\section{Pixel-level Linear Model}
+Finally, Linear model is applied to the target pixel, and the N pixels of the closest star  (in terms Kepler magnitude) on the same CCD and quarter are used to fit the target pixel:
+
+\begin{align*}
+I_{mn}^{*}=\sum_{m' \in M_{m}} a_{mnm'}I_{m'n'}
+\end{align*}
+\\
+where $I_{mn}$ is the flux(using data from the Target Pixel Files) of pixel m at time $t_{n}$, $I_{mn}^{*}$ is the prediction for data point $I_{mn}$ of the target and $a_{mnm'}$  is the linear coefficients of the prediction. $M_{m}$ is set of pixels of the closest star (in terms Kepler magnitude)
+\\
+\\
+To get the best fit coefficient, the $\chi$ square should be minimised, Variance $\sigma _{mn}^{2}$ is treated to be the same for different time $t_{n}$
+\begin{align*}
+\chi_{m}^{2}=\sum_{n' \in N_{n}} \frac{[I_{mn}-I_{mn}^{*}]^{2}}{\sigma _{mn}^{2}}
+\end{align*}
+\\
+The model is used to fit the pixel (2,4) of the KIC 5088536, here is the result of the best fit\\
+The flux-time plot of the origin data and the fit prediction:\\
+\url{http://physics.nyu.edu/~dw1519/kepler/plot/5088536/fit/fitPixel(2,4).png}\\
+Best fit coefficient of Pixel (2,4) in KIC 5088536:\\
+\url{http://physics.nyu.edu/~dw1519/kepler/plot/5088536/fit/coe.dat}\\
+
+\section{Reference}
+1. Erik A. Petigura, et al. (2013) Prevalence of Earth-size planets orbiting Sun-like stars\\
+2. \url{http://exoplanetarchive.ipac.caltech.edu/cgi-bin/ExoTables/nph-exotbls?dataset=planets}
+
+\end{document}
