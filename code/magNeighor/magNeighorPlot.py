@@ -34,7 +34,7 @@ while len(stars) <17:
         j+=1
     elif tmpOver.kic_kepmag-originStar.kic_kepmag < originStar.kic_kepmag-tmpUnder.kic_kepmag:
         stars[tmpOver.ktc_kepler_id] = tmpOver
-        j+=1
+        i+=1
     else:
         stars[tmpUnder.ktc_kepler_id] = tmpUnder
         stars[tmpOver.ktc_kepler_id] = tmpOver
