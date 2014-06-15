@@ -4,16 +4,20 @@ import matplotlib.pyplot as plt
 
 client = kplr.API()
 
-def findMagNeighor(originTpf, num):
-    starsOver = client.target_pixel_files(kic_kepmag=">=%f"%originTpf.kic_kepmag, sci_data_quarter=originTpf.sci_data_quarter, sci_channel=originTpf.sci_channel, sort=("kic_kepmag", 1),ktc_target_type="LC", max_records=num+1)
-    starsUnder = client.target_pixel_files(kic_kepmag="<=%f"%originTpf.kic_kepmag, sci_data_quarter=originTpf.sci_data_quarter, sci_channel=originTpf.sci_channel, sort=("kic_kepmag", -1),ktc_target_type="LC", max_records=num+1)
+def findMagNeighor(originTpf, num, offset=0, ccd=True):
+    if ccd:
+        starsOver = client.target_pixel_files(ktc_kepler_id="!=%d"%originTpf.ktc_kepler_id, kic_kepmag=">=%f"%originTpf.kic_kepmag, sci_data_quarter=originTpf.sci_data_quarter, sci_channel=originTpf.sci_channel, sort=("kic_kepmag", 1),ktc_target_type="LC", max_records=num+offset)
+        starsUnder = client.target_pixel_files(ktc_kepler_id="!=%d"%originTpf.ktc_kepler_id, kic_kepmag="<=%f"%originTpf.kic_kepmag, sci_data_quarter=originTpf.sci_data_quarter, sci_channel=originTpf.sci_channel, sort=("kic_kepmag", -1),ktc_target_type="LC", max_records=num+offset)
+    else:
+        starsOver = client.target_pixel_files(ktc_kepler_id="!=%d"%originTpf.ktc_kepler_id, kic_kepmag=">=%f"%originTpf.kic_kepmag, sci_data_quarter=originTpf.sci_data_quarter, sci_channel="!=%d"%originTpf.sci_channel, sort=("kic_kepmag", 1),ktc_target_type="LC", max_records=num+offset)
+        starsUnder = client.target_pixel_files(ktc_kepler_id="!=%d"%originTpf.ktc_kepler_id, kic_kepmag="<=%f"%originTpf.kic_kepmag, sci_data_quarter=originTpf.sci_data_quarter, sci_channel="!=%d"%originTpf.sci_channel, sort=("kic_kepmag", -1),ktc_target_type="LC", max_records=num+offset)
     
     stars = {}
-    stars[originTpf.ktc_kepler_id] = originTpf
     
     i=0
     j=0
-    while len(stars) <num+1:
+    offsetList =[]
+    while len(stars) <num+offset:
         while starsOver[i].ktc_kepler_id in stars:
             i+=1
         tmpOver = starsOver[i]
@@ -23,17 +27,39 @@ def findMagNeighor(originTpf, num):
         if tmpOver.kic_kepmag-originTpf.kic_kepmag > originTpf.kic_kepmag-tmpUnder.kic_kepmag:
             stars[tmpUnder.ktc_kepler_id] = tmpUnder
             j+=1
+            if len(stars)>offset:
+                pass
+            else:
+                offsetList.append(tmpUnder.ktc_kepler_id)
         elif tmpOver.kic_kepmag-originTpf.kic_kepmag < originTpf.kic_kepmag-tmpUnder.kic_kepmag:
             stars[tmpOver.ktc_kepler_id] = tmpOver
-            j+=1
-        else:
+            i+=1
+            if len(stars)>offset:
+                pass
+            else:
+                offsetList.append(tmpOver.ktc_kepler_id)
+        elif len(stars) < num+offset-1:
             stars[tmpUnder.ktc_kepler_id] = tmpUnder
             stars[tmpOver.ktc_kepler_id] = tmpOver
             i+=1
             j+=1
-
-    stars.pop(originTpf.ktc_kepler_id)
-
+            if len(stars)>offset+1:
+                pass
+            elif len(stars) == offset+1:
+                offsetList.append(tmpUnder.ktc_kepler_id)
+            else:
+                offsetList.append(tmpOver.ktc_kepler_id)
+                offsetList.append(tmpUnder.ktc_kepler_id)
+        else:
+            stars[tmpOver.ktc_kepler_id] = tmpOver
+            i+=1
+            if len(stars)>offset:
+                pass
+            else:
+                offsetList.append(tmpOver.ktc_kepler_id)
+    
+    for key in offsetList:
+        stars.pop(key)
     return stars
 
 def convertData(tdf):
@@ -53,10 +79,10 @@ def convertData(tdf):
 
     return time, flux, mask, shape
 
-def neighorFit(neighorNum=1):
+def neighorFit(neighorNum=1, offset=0, ccd=True):
     originStar = client.star(5088536)
     originTpf = client.target_pixel_files(ktc_kepler_id=originStar.kepid, sci_data_quarter=5)[0]
-    neighor = findMagNeighor(originTpf, neighorNum)
+    neighor = findMagNeighor(originTpf, neighorNum, offset, ccd)
 
     time, targetFlux, targetMask, targetShape = convertData(originTpf)
 
@@ -94,11 +120,11 @@ def neighorFit(neighorNum=1):
 
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                         wspace=0, hspace=0)
-    plt.suptitle('Kepler %d Quarter %d CCD Channel %d\n Kepler magnitude %f'%(originTpf.ktc_kepler_id, originTpf.sci_data_quarter, originTpf.sci_channel, originTpf.kic_kepmag))
-    plt.savefig('fitPixel(2,4)-%d.png'%neighorNum)
+    plt.suptitle('Kepler %d Quarter %d Pixel(2,4) \n Fit Source[Initial:%d Number:%d CCD:%r] Total residuals:%f'%(originTpf.ktc_kepler_id, originTpf.sci_data_quarter, offset+1, neighorNum, ccd, result[1][10]))
+    plt.savefig('fit(2,4)_%d_%d_ccd%r.png'%(offset+1,neighorNum,ccd))
     plt.clf()
 
-    f = open('coe-%d.dat'%neighorNum, 'w')
+    f = open('coe(2,4)_%d_%d_ccd%r.dat'%(offset+1,neighorNum,ccd), 'w')
     loc = 0
     for n in range(0, neighorNum):
         coe = np.zeros_like(neighorMaskes[n], dtype=float)
@@ -117,16 +143,22 @@ def neighorFit(neighorNum=1):
     f.write('Sums of residuals:%f'%result[1][10])
     f.close()
     return result
-
+'''
 neighorNum = np.arange(12)+1
 residuals = np.empty_like(neighorNum)
 for i in neighorNum:
-    residuals[i-1] = neighorFit(i)[1][10]
+    residuals[i-1] = neighorFit(i,0,True)[1][10]
 plt.clf()
 plt.plot(neighorNum,residuals,'bs')
 plt.xlabel("Number of Neighors")
 plt.ylabel("Total squared residuals")
 plt.savefig('neighorNum-res.png')
+'''
+neighorFit(1,0,True)
+neighorFit(2,0,True)
+neighorFit(1,1,True)
+neighorFit(1,0,False)
+
 
 
 
