@@ -77,6 +77,8 @@ def convertData(tdf):
     for i in range(flux.shape[1]):
         interMask = np.isfinite(flux[:,i])
         flux[~interMask,i] = np.interp(time[~interMask], time[interMask], flux[interMask,i])
+#reduce the magnitude of all flux
+    flux = flux/100000
 
     return time, flux, mask, shape
 
