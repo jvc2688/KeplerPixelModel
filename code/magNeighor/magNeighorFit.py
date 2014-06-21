@@ -77,8 +77,6 @@ def convertData(tdf):
     for i in range(flux.shape[1]):
         interMask = np.isfinite(flux[:,i])
         flux[~interMask,i] = np.interp(time[~interMask], time[interMask], flux[interMask,i])
-#reduce the magnitude of all flux
-    flux = flux/100000
 
     return time, flux, mask, shape
 
@@ -97,7 +95,9 @@ def neighorFit(neighorNum=1, offset=0, ccd=True, l2=0):
         neighorFluxes.append(tmpResult[1])
         neighorMaskes.append(tmpResult[2])
         neighorShapes.append(tmpResult[3])
-    neighorFluxMatrix = np.concatenate(neighorFluxes, axis=1)
+    
+    neighorFluxMatrix = np.float64(np.concatenate(neighorFluxes, axis=1))
+
 
 #result  = np.linalg.lstsq(neighorFluxMatrix, targetFlux)
     result = lss.leastSquareSolve(neighorFluxMatrix, targetFlux, l2)
@@ -166,27 +166,29 @@ plt.clf()
 plt.plot(neighorNum,rms,'bs')
 plt.xlabel("Number of parameters")
 plt.ylabel("RMS Deviation")
+plt.ylim(ymin=0)
 plt.savefig('paraNum-rms.png')
 
 neighorFit(1,0,True)
 neighorFit(2,0,True)
 neighorFit(1,1,True)
 neighorFit(1,0,False)
-
-
-neighorFit(1,0,True, 0)
-
 '''
-strength = np.arange(57)
+neighorFit(5,0,True, 0)
+'''
+
+
+strength = np.arange(7)
 rms = np.empty_like(strength, dtype=float)
 for i in strength:
-    result = neighorFit(5, 0, True, 10000*(strength[i]))
-    strength[i] = 10000*(strength[i])
+    result = neighorFit(5, 0, True, (1e-8)*(10**strength[i]))
     rms[i] = result[2][10]
+    strength[i] -= 8
 plt.clf()
 plt.plot(strength,rms,'bs')
-plt.xlabel("Strength of Regularization")
+plt.xlabel(r'Strength of Regularization($log \lambda$)')
 plt.ylabel("RMS Deviation")
+plt.ylim(ymin=0)
 plt.savefig('l2-rms.png')
-
+'''
 
