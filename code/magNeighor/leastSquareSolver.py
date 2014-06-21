@@ -1,15 +1,20 @@
 import numpy as np
 
 def leastSquareSolve(a, y, l2=0):
-#250000.0
-
 #using normal equation
     fy = np.dot(a.T, y)
     fa = np.dot(a.T, a)
+    print a.shape
+    print np.max(fa)
+    print np.min(fa)
+    print np.max(fy)
+    print np.min(fy)
+    print np.linalg.slogdet(fa)
 #adding l2 regularization
     i = np.identity(fa.shape[0])
     re = l2 * i
     result = []
+    print np.linalg.slogdet(fa+re)
     result.append(np.linalg.solve(fa+re, fy))
 #calculating the residual and rms deviation
     fit = np.dot(a, result[0])
@@ -22,7 +27,6 @@ def leastSquareSolve(a, y, l2=0):
     result.append(rms)
     return result
 '''
-    
 #using svd
     eps = np.finfo(float).eps
     n = a.shape[0]
