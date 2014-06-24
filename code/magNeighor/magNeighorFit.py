@@ -80,9 +80,9 @@ def convertData(tdf):
 
     return time, flux, mask, shape
 
-def neighorFit(neighorNum=1, offset=0, ccd=True, l2=0):
-    originStar = client.star(5088536)
-    originTpf = client.target_pixel_files(ktc_kepler_id=originStar.kepid, sci_data_quarter=5)[0]
+def neighorFit(kic, quarter, neighorNum=1, offset=0, ccd=True, l2=0):
+    originStar = client.star(kic)
+    originTpf = client.target_pixel_files(ktc_kepler_id=originStar.kepid, sci_data_quarter=quarter)[0]
     neighor = findMagNeighor(originTpf, neighorNum, offset, ccd)
 
     time, targetFlux, targetMask, targetShape = convertData(originTpf)
@@ -98,8 +98,6 @@ def neighorFit(neighorNum=1, offset=0, ccd=True, l2=0):
     
     neighorFluxMatrix = np.float64(np.concatenate(neighorFluxes, axis=1))
 
-
-#result  = np.linalg.lstsq(neighorFluxMatrix, targetFlux)
     result = lss.leastSquareSolve(neighorFluxMatrix, targetFlux, l2)
 
     f, axes = plt.subplots(3, 1)
@@ -148,47 +146,47 @@ def neighorFit(neighorNum=1, offset=0, ccd=True, l2=0):
     f.close()
     return result
 
-'''
-neighorNum = np.arange(12)+1
-residuals = np.empty_like(neighorNum, dtype=float)
-rms = np.empty_like(neighorNum, dtype=float)
-for i in neighorNum:
-    result = neighorFit(i, 0, True, 0)
-    residuals[i-1] = result[1][10]
-    rms[i-1] = result[2][10]
-    neighorNum[i-1] = result[0].shape[0]
-plt.clf()
-plt.plot(neighorNum,residuals,'bs')
-plt.xlabel("Number of parameters")
-plt.ylabel("Total squared residuals")
-plt.savefig('paraNum-res.png')
-plt.clf()
-plt.plot(neighorNum,rms,'bs')
-plt.xlabel("Number of parameters")
-plt.ylabel("RMS Deviation")
-plt.ylim(ymin=0)
-plt.savefig('paraNum-rms.png')
+if __name__ == "__main__":
+    if False:
+        neighorNum = np.arange(12)+1
+        residuals = np.empty_like(neighorNum, dtype=float)
+        rms = np.empty_like(neighorNum, dtype=float)
+        for i in neighorNum:
+            result = neighorFit(5088536, 5, i, 0, True, 0)
+            residuals[i-1] = result[1][10]
+            rms[i-1] = result[2][10]
+            neighorNum[i-1] = result[0].shape[0]
+        plt.clf()
+        plt.plot(neighorNum,residuals,'bs')
+        plt.xlabel("Number of parameters")
+        plt.ylabel("Total squared residuals")
+        plt.savefig('paraNum-res.png')
+        plt.clf()
+        plt.plot(neighorNum,rms,'bs')
+        plt.xlabel("Number of parameters")
+        plt.ylabel("RMS Deviation")
+        plt.ylim(ymin=0)
+        plt.savefig('paraNum-rms.png')
 
-neighorFit(1,0,True)
-neighorFit(2,0,True)
-neighorFit(1,1,True)
-neighorFit(1,0,False)
-'''
-neighorFit(5,0,True, 0)
-'''
+    if False:
+        neighorFit(5088536, 5, 1, 0, True)
+        neighorFit(5088536, 5, 2, 0, True)
+        neighorFit(5088536, 5, 1, 1, True)
+        neighorFit(5088536, 5, 1, 0, False)
 
+    if True:
+        neighorFit(5088536, 5, 5, 0, True, 0)
 
-strength = np.arange(7)
-rms = np.empty_like(strength, dtype=float)
-for i in strength:
-    result = neighorFit(5, 0, True, (1e-8)*(10**strength[i]))
-    rms[i] = result[2][10]
-    strength[i] -= 8
-plt.clf()
-plt.plot(strength,rms,'bs')
-plt.xlabel(r'Strength of Regularization($log \lambda$)')
-plt.ylabel("RMS Deviation")
-plt.ylim(ymin=0)
-plt.savefig('l2-rms.png')
-'''
-
+    if False:
+        strength = np.arange(7)
+        rms = np.empty_like(strength, dtype=float)
+        for i in strength:
+            result = neighorFit(5088536, 5, 5, 0, True, (1e-8)*(10**strength[i]))
+            rms[i] = result[2][10]
+            strength[i] -= 8
+        plt.clf()
+        plt.plot(strength,rms,'bs')
+        plt.xlabel(r'Strength of Regularization($log \lambda$)')
+        plt.ylabel("RMS Deviation")
+        plt.ylim(ymin=0)
+        plt.savefig('l2-rms.png')
