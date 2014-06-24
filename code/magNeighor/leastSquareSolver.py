@@ -1,4 +1,5 @@
 import numpy as np
+from scipy import linalg
 
 def leastSquareSolve(a, y, l2=0, svd=False):
     if not(svd):
@@ -16,7 +17,10 @@ def leastSquareSolve(a, y, l2=0, svd=False):
             re = l2 * i
             result = []
             print np.linalg.slogdet(fa+re)
-            result.append(np.linalg.solve(fa+re, fy))
+            print fa
+            cho = linalg.cho_factor(fa+re)
+            result.append(linalg.cho_solve(cho, fy))
+            #result.append(np.linalg.solve(fa+re, fy))
         #calculating the residual and rms deviation
             fit = np.dot(a, result[0])
             res = y - fit
