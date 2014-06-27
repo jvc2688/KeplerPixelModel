@@ -7,6 +7,7 @@ def leastSquareSolve(a, y, l2=0, svd=False):
             fy = np.dot(a.T, y)
             fa = np.dot(a.T, a)
             print a.shape
+            print y.shape
             print np.max(fa)
             print np.min(fa)
             print np.max(fy)
