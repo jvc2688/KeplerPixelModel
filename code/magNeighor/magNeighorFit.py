@@ -8,6 +8,7 @@ import leastSquareSolver as lss
 client = kplr.API()
 Pixel = 17
 Percent = 0
+Fake_Po = 2000
 
 #fint the neighors in magnitude
 def find_mag_neighor(origin_tpf, num, offset=0, ccd=True):
@@ -75,6 +76,7 @@ def get_pixel_mask(flux, kplr_mask):
     pixel_mask[:, (kplr_mask < 1)] = 0 # unless masked by kplr
     return pixel_mask
 
+#find the epoch mask
 def get_epoch_mask(pixel_mask):
     foo = np.sum(np.sum((pixel_mask > 0), axis=2), axis=1)
     epoch_mask = np.zeros_like(foo)
@@ -92,24 +94,27 @@ def load_data(tpf):
         flux_err = hdu_data["flux_err"]
     pixel_mask = get_pixel_mask(flux, kplr_mask)
     epoch_mask = get_epoch_mask(pixel_mask)
-    time = time[epoch_mask>0]
-    flux[pixel_mask==0] = 0
+    #flux[pixel_mask==0] = 0
+    flux = flux[:, kplr_mask>0]
+    flux_err = flux_err[:, kplr_mask>0]
     shape = flux.shape
+    '''
+    time = time[epoch_mask>0]
     flux = flux[epoch_mask>0,:]
-    flux = flux[:,kplr_mask>0]
+    '''
     flux = flux.reshape((flux.shape[0], -1))
+    flux_err = flux_err.reshape((flux.shape[0], -1))
 
     #mask = np.array(np.sum(np.isfinite(flux), axis=0), dtype=bool)
     #flux = flux[:, mask]
 
-    '''
     #interpolate the bad points
     for i in range(flux.shape[1]):
         interMask = np.isfinite(flux[:,i])
         flux[~interMask,i] = np.interp(time[~interMask], time[interMask], flux[interMask,i])
-    '''
-    print('time:%f'%(time[2]-time[1]))
-    return time, flux, pixel_mask, kplr_mask
+        flux_err[~interMask,i] = np.inf
+
+    return time, flux, pixel_mask, kplr_mask, epoch_mask, flux_err
 
 def get_train_mask(target_flux, percent=0.1, specify=False, initial=0, length=0):
     if specify:
@@ -119,29 +124,28 @@ def get_train_mask(target_flux, percent=0.1, specify=False, initial=0, length=0)
         train_mask = np.ones(target_flux.shape[0])
         length = int(target_flux.shape[0] * percent)
         initial = int(target_flux.shape[0] * (0.5-percent/2.0))
-        print length
         train_mask[initial:initial+length] = 0
     return train_mask
 
 def get_fake_data(target_flux, position, length):
     #the sine distortion
-    
+    '''
     factor = np.arange(target_flux.shape[0])
     factor = (1+0.004*np.sin(12*np.pi*factor/factor[-1]))
     for i in range(0, target_flux.shape[0]):
         target_flux[i] = target_flux[i] * factor[i]
-    
+    '''
     #the fake transit
-    #target_flux[position:position+length, :] = target_flux[position:position+length, :]*(1+0.004)
+    target_flux[position:position+length, :] = target_flux[position:position+length, :]*(1+0.004)
     return target_flux
 
 #fit the target kic with the pixels of the neighors in magnitude
-def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True):
+def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True, normal=False, test=False):
     origin_star = client.star(kic)
     origin_tpf = client.target_pixel_files(ktc_kepler_id=origin_star.kepid, sci_data_quarter=quarter)[0]
     neighor = find_mag_neighor(origin_tpf, neighor_num, offset, ccd)
 
-    time, target_flux, target_pixel_mask, target_kplr_mask = load_data(origin_tpf)
+    time, target_flux, target_pixel_mask, target_kplr_mask, epoch_mask, flux_err= load_data(origin_tpf)
 
     neighor_kid, neighor_fluxes, neighor_pixel_maskes, neighor_kplr_maskes = [], [], [], []
 
@@ -151,20 +155,46 @@ def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True
         neighor_fluxes.append(tmpResult[1])
         neighor_pixel_maskes.append(tmpResult[2])
         neighor_kplr_maskes.append(tmpResult[3])
+        epoch_mask *= tmpResult[4]
     
+    #remove bad time point based on simulteanous epoch mask
+    time = time[epoch_mask>0]
+    target_flux = target_flux[epoch_mask>0]
+    flux_err = flux_err[epoch_mask>0]
+    covar = np.zeros((flux_err.shape[0], flux_err.shape[0]))
+    for i in range(0, flux_err.shape[0]):
+        covar[i, i] = flux_err[i][Pixel]
+    for i in range(0, len(neighor_fluxes)):
+        neighor_fluxes[i] = neighor_fluxes[i][epoch_mask>0, :]
+    #neighor_flux_matrix = neighor_flux_matrix[epoch_mask>0, :]
+    
+    print target_flux.shape
+
+    #insert fake signal into the data
+    target_flux = get_fake_data(target_flux, Fake_Po, 20)
+
+    #normalize the data
+    if normal:
+        for i in range(0, len(neighor_fluxes)):
+            neighor_fluxes[i] = (neighor_fluxes[i] - np.mean(neighor_fluxes[i]))/np.var(neighor_fluxes[i])
+            target_flux = (target_flux - np.mean(target_flux))/np.var(target_flux)
+
+    #construt the neighor flux matrix
     neighor_flux_matrix = np.float64(np.concatenate(neighor_fluxes, axis=1))
 
-    target_flux = get_fake_data(target_flux, 2000, 20)
-
-    train_mask = get_train_mask(target_flux, Percent)
-    #train_mask = get_train_mask(target_flux, Percent, True, 1986, 68)
+    #spilt the train and test set
+    train_mask = get_train_mask(target_flux, 0)
+    if test:
+        train_mask = get_train_mask(target_flux, Percent)
+        train_mask = get_train_mask(target_flux, Percent, True, Fake_Po-24, 68)
     target_train_set = target_flux[train_mask>0, :]
     neighor_train_set = neighor_flux_matrix[train_mask>0, :]
     target_test_set = target_flux[train_mask==0, :]
     neighor_test_set = neighor_flux_matrix[train_mask==0, :]
     time_test = time[train_mask==0]
 
-    result = lss.leastSquareSolve(neighor_train_set, target_train_set, l2)
+    #do the linear least square fitting
+    result = lss.leastSquareSolve(neighor_train_set, target_train_set, None, l2)
 
     pixel_x = (Pixel+1)%target_pixel_mask.shape[2]
     pixel_y = (Pixel+1)//target_pixel_mask.shape[2]+1
@@ -175,7 +205,7 @@ def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True
     test_rms = np.sqrt(np.mean(test_dev**2, axis=0))
     result.append(test_rms)
 
-#plot the three pannel figure of the test set
+    #plot the three pannel figure of the test set
     if False:
         f, axes = plt.subplots(3, 1)
         
@@ -217,19 +247,20 @@ def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True
         axes[1].set_ylabel("flux of fit")
         
         ratio = np.divide(target_flux, fit_flux)
-        result.append(np.mean(ratio[2000:2020, :], axis=0)/1.004)
+        
+        result.append((np.mean(ratio[Fake_Po:Fake_Po+20, :], axis=0)-1.004)/0.004)
         axes[2].plot(time, np.divide(target_flux[:, Pixel], fit_flux[:, Pixel]))
         axes[2].set_ylim(0.990,1.010)
         axes[2].set_xlabel("time")
         axes[2].set_ylabel("ratio of data and fit")
-        sin = 1+0.004*np.sin(12*np.pi*(time-time[0])/(time[-1]-time[0]))
-        axes[2].plot(time, sin, color='red')
-        #axes[2].axhline(y=1.004,xmin=0,xmax=3,c="red",linewidth=0.5,zorder=0)
+        #sin = 1+0.004*np.sin(12*np.pi*(time-time[0])/(time[-1]-time[0]))
+        #axes[2].plot(time, sin, color='red')
+        axes[2].axhline(y=1.004,xmin=0,xmax=3,c="red",linewidth=0.5,zorder=0)
 
         plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                             wspace=0, hspace=0)
         plt.suptitle('Kepler %d Quarter %d Pixel(%d,%d) \n Fit Source[Initial:%d Number:%d CCD:%r] RMS Deviation:%f'%(origin_tpf.ktc_kepler_id, origin_tpf.sci_data_quarter, pixel_y, pixel_x, offset+1, neighor_num, ccd, result[2][Pixel]))
-        plt.savefig('fit(%d,%d)_%d_%d_ccd%rTran_reg%.0eSin.png'%(pixel_y, pixel_x, offset+1,neighor_num,ccd, l2))
+        plt.savefig('fit(%d,%d)_%d_%d_ccd%rTran_reg%.0e.png'%(pixel_y, pixel_x, offset+1,neighor_num,ccd, l2))
         plt.clf()
 
     #print the fitting coefficient
@@ -258,19 +289,40 @@ def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True
 
 if __name__ == "__main__":
     if False:
+        loop_num = np.arange(20)
+        neighor_num = np.arange(20)+1
+        ratio = np.empty_like(neighor_num, dtype=float)
+        option = [(False, False, 'bs'), (True, False, 'gs'), (False, True, 'rs'), (True, True, 'ys')]
+        for opt in option:
+            normal, test, color = opt
+            for i in loop_num:
+                result = neighor_fit(5088536, 5, i, 0, True, 0, normal, test)
+                ratio[i] = result[4][Pixel]
+                neighor_num[i] = result[0].shape[0]
+                print ratio[i]
+            plt.plot(neighor_num, ratio, color, label="normal:%r\n train-test:%r"%(normal, test))
+        #plt.title('test-train')
+        plt.xlabel("Number of parameters")
+        plt.ylabel("ratio of the fitting and true singal")
+        #plt.ylim(ymax=1)
+        #plt.ylim(0.99, 1.01)
+        plt.savefig('paraNum-ratio_pixel(3,4)Compare.png')
+        plt.show()
+    if False:
         neighor_num = np.arange(20)+1
         ratio = np.empty_like(neighor_num, dtype=float)
         for i in neighor_num:
             result = neighor_fit(5088536, 5, i, 0, True, 0)
             ratio[i-1] = result[4][Pixel]
             neighor_num[i-1] = result[0].shape[0]
+            print ratio[i-1]
         plt.plot(neighor_num,ratio,'bs')
-        plt.title('test-train')
+        #plt.title('test-train')
         plt.xlabel("Number of parameters")
         plt.ylabel("ratio of the fitting and true singal")
         #plt.ylim(ymax=1)
-        plt.ylim(0.99, 1.01)
-        plt.savefig('paraNum-ratio_pixel(3,4)Train.png')
+        #plt.ylim(0.99, 1.01)
+        plt.savefig('paraNum-ratio_pixel(3,4).png')
 
     if False:
         neighor_num = np.arange(12)+1
@@ -301,23 +353,24 @@ if __name__ == "__main__":
         neighor_fit(5088536, 5, 1, 0, False)
 
     if True:
-        result = neighor_fit(5088536, 5, 5, 0, True, 0, True)
+        result = neighor_fit(5088536, 5, 5, 0, True, 0, True, False, False)
+        print result[4][Pixel]
 
     if False:
         num = 5
-        strength = np.arange(8)
+        strength = np.arange(10)
         ratio = np.empty_like(strength, dtype=float)
         for i in strength:
-            result = neighor_fit(5088536, 5, num, 0, True, (1e3)*(10**strength[i]), True)
+            result = neighor_fit(5088536, 5, num, 0, True, (1e-18)*(10**strength[i]), True, True, False)
             ratio[i] = result[4][Pixel]
-            strength[i] += 3
+            strength[i] += -18
         plt.clf()
         plt.plot(strength, ratio, 'bs')
-        plt.title('Number of stars:%d'%num)
+        plt.title('Without normalization\n Number of stars:%d'%num)
         plt.xlabel(r'Strength of Regularization($log \lambda$)')
-        plt.ylabel("ratio of the fitting and true singal")
-        plt.ylim(ymax=1.0)
-        plt.savefig('l2-ratio_num%d_pixel(3,4).png'%num)
+        plt.ylabel("bias from the true singal")
+        #plt.ylim(ymax=1.0)
+        plt.savefig('l2-bias_num%d_pixel(3,4)nor.png'%num)
 
     if False:
         strength = np.arange(7)
@@ -334,10 +387,10 @@ if __name__ == "__main__":
         plt.savefig('l2-rms.png')
 
     if False:
-        neighor_num = np.arange(5)+1
+        neighor_num = np.arange(20)+1
         para_num = np.empty_like(neighor_num)
         print neighor_num
-        strength = np.arange(5)
+        strength = np.arange(10)
         ratio = np.empty((strength.shape[0], neighor_num.shape[0]), dtype=float)
         for i in strength:
             for j in neighor_num:
@@ -345,14 +398,17 @@ if __name__ == "__main__":
                 result = neighor_fit(5088536, 5, j, 0, True, (10**strength[i]), True)
                 ratio[i, j-1] = result[4][Pixel]
                 para_num[j-1] = result[0].shape[0]
+        print ratio
         plt.clf()
-        im = plt.imshow(ratio, interpolation='bilinear', origin='lower', cmap=cm.gray, extent=(-3,3,-2,2))
-        plt.contourf(strength, para_num, ratio)
+        plt.imshow(ratio, aspect='auto', cmap=plt.get_cmap('Greys'))
         #plt.title('Number of stars:%d'%num)
-        plt.xlabel(r'Strength of Regularization($log \lambda$)')
-        plt.ylabel("Number of parameters")
-        plt.flag()
-        plt.colorbar(im, orientation='horizontal', shrink=0.8)
-        #plt.ylim(ymax=1.0)
+        plt.ylabel(r'Strength of Regularization($log \lambda$)')
+        plt.xlabel("Number of parameters")
+        cbar = plt.colorbar()
+        x = np.arange(20)
+        y = np.arange(10)
+        plt.yticks(y, strength)
+        plt.xticks(x[0:-1:2], para_num[0:-1:2])
+        cbar.ax.set_ylabel('ratio of the fitting to true singal', rotation=270)
         plt.savefig('l2-num-ratio_pixel(3,4).png')
 
