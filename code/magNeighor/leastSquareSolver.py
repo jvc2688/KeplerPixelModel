@@ -12,7 +12,6 @@ def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
             icovar = np.zeros_like(covar)
             for i in range(0, covar.shape[0]):
                 icovar[i, i] = 1./covar[i, i]
-            print np.max(covar)
             fy = np.dot(icovar, y)
             fy = np.dot(a.T, fy)
             fa = np.dot(icovar, a)

@@ -9,6 +9,7 @@ client = kplr.API()
 Pixel = 17
 Percent = 0
 Fake_Po = 2000
+Fake_Len = 20
 
 #fint the neighors in magnitude
 def find_mag_neighor(origin_tpf, num, offset=0, ccd=True):
@@ -113,17 +114,25 @@ def load_data(tpf):
         interMask = np.isfinite(flux[:,i])
         flux[~interMask,i] = np.interp(time[~interMask], time[interMask], flux[interMask,i])
         flux_err[~interMask,i] = np.inf
-
+    
     return time, flux, pixel_mask, kplr_mask, epoch_mask, flux_err
 
-def get_train_mask(target_flux, percent=0.1, specify=False, initial=0, length=0):
+def get_kfold_train_mask(length, k):
+    step = length//k
+    train_mask = np.ones(length, dtype=int)
+    for i in range(0, k-1):
+        train_mask[i*step:(i+1)*step] = i
+    train_mask[(k-1)*step:] = k-1
+    return train_mask
+
+def get_train_mask(total_length, percent=0.1, specify=False, initial=0, length=0):
     if specify:
-        train_mask = np.ones(target_flux.shape[0])
+        train_mask = np.ones(total_length)
         train_mask[initial:initial+length] = 0
     else:
-        train_mask = np.ones(target_flux.shape[0])
-        length = int(target_flux.shape[0] * percent)
-        initial = int(target_flux.shape[0] * (0.5-percent/2.0))
+        train_mask = np.ones(total_length)
+        length = int(total_length * percent)
+        initial = int(total_length * (0.5-percent/2.0))
         train_mask[initial:initial+length] = 0
     return train_mask
 
@@ -140,7 +149,7 @@ def get_fake_data(target_flux, position, length):
     return target_flux
 
 #fit the target kic with the pixels of the neighors in magnitude
-def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True, normal=False, test=False):
+def get_fit_matrix(kic, quarter, neighor_num=1, offset=0, ccd=True, normal=False, fake_po=0, fake_len=0, constant=False):
     origin_star = client.star(kic)
     origin_tpf = client.target_pixel_files(ktc_kepler_id=origin_star.kepid, sci_data_quarter=quarter)[0]
     neighor = find_mag_neighor(origin_tpf, neighor_num, offset, ccd)
@@ -168,113 +177,96 @@ def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True
         neighor_fluxes[i] = neighor_fluxes[i][epoch_mask>0, :]
     #neighor_flux_matrix = neighor_flux_matrix[epoch_mask>0, :]
     
-    print target_flux.shape
-
     #insert fake signal into the data
-    target_flux = get_fake_data(target_flux, Fake_Po, 20)
+    if fake_len != 0:
+        target_flux = get_fake_data(target_flux, fake_po, fake_len)
 
     #normalize the data
     if normal:
         for i in range(0, len(neighor_fluxes)):
-            neighor_fluxes[i] = (neighor_fluxes[i] - np.mean(neighor_fluxes[i]))/np.var(neighor_fluxes[i])
-            target_flux = (target_flux - np.mean(target_flux))/np.var(target_flux)
+            neighor_fluxes[i] = (neighor_fluxes[i] - np.mean(neighor_fluxes[i]))/np.std(neighor_fluxes[i])
+        target_flux = (target_flux - np.mean(target_flux))/np.std(target_flux)
 
     #construt the neighor flux matrix
     neighor_flux_matrix = np.float64(np.concatenate(neighor_fluxes, axis=1))
 
-    #spilt the train and test set
-    train_mask = get_train_mask(target_flux, 0)
-    if test:
-        train_mask = get_train_mask(target_flux, Percent)
-        train_mask = get_train_mask(target_flux, Percent, True, Fake_Po-24, 68)
-    target_train_set = target_flux[train_mask>0, :]
-    neighor_train_set = neighor_flux_matrix[train_mask>0, :]
-    target_test_set = target_flux[train_mask==0, :]
-    neighor_test_set = neighor_flux_matrix[train_mask==0, :]
-    time_test = time[train_mask==0]
+    '''
+    if normal:
+        #neighor_flux_matrix = (neighor_flux_matrix - np.mean(neighor_flux_matrix))/np.var(neighor_flux_matrix)
+        mean = np.mean(neighor_flux_matrix, axis=0)
+        std = np.std(neighor_flux_matrix, axis=0)
+        neighor_flux_matrix = (neighor_flux_matrix - mean)/std
+        print(mean, mean.shape)
+        print(std, std.shape)
+        print(neighor_flux_matrix.shape)
+        target_flux = (target_flux - np.mean(target_flux, axis=0))/np.std(target_flux, axis=0)
+    '''
 
-    #do the linear least square fitting
-    result = lss.leastSquareSolve(neighor_train_set, target_train_set, None, l2)
+    
+    #add the constant level
+    if constant:
+        neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.ones((neighor_flux_matrix.shape[0], 1))), axis=1)
 
     pixel_x = (Pixel+1)%target_pixel_mask.shape[2]
     pixel_y = (Pixel+1)//target_pixel_mask.shape[2]+1
 
-    test_fit = np.dot(neighor_test_set, result[0])
-    test_ratio = np.divide(target_test_set, test_fit)
-    test_dev = test_ratio - 1.0
-    test_rms = np.sqrt(np.mean(test_dev**2, axis=0))
-    result.append(test_rms)
-
-    #plot the three pannel figure of the test set
-    if False:
-        f, axes = plt.subplots(3, 1)
-        
-        axes[0].plot(time_test, target_test_set[:, Pixel])
-        plt.setp( axes[0].get_xticklabels(), visible=False)
-        plt.setp( axes[0].get_yticklabels(), visible=False)
-        axes[0].set_ylabel("flux of tpf")
-        
-        axes[1].plot(time_test, test_fit[:, Pixel])
-        plt.setp( axes[1].get_xticklabels(), visible=False)
-        plt.setp( axes[1].get_yticklabels(), visible=False)
-        axes[1].set_ylabel("flux of fit")
-        
-        axes[2].plot(time_test, test_ratio[:, Pixel])
-        axes[2].set_ylim(0.999,1.001)
-        axes[2].set_xlabel("time")
-        axes[2].set_ylabel("ratio of data and fit")
-        
-        plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
-                            wspace=0, hspace=0)
-        plt.suptitle('Kepler %d Quarter %d Pixel(%d,%d) \n Fit Source[Initial:%d Number:%d CCD:%r] RMS Deviation:%f'%(origin_tpf.ktc_kepler_id, origin_tpf.sci_data_quarter, pixel_y, pixel_x, offset+1, neighor_num, ccd, test_rms[Pixel]))
-        plt.savefig('fit(%d,%d)_%d_%d_ccd%r_test.png'%(pixel_y, pixel_x, offset+1,neighor_num,ccd))
-        plt.clf()
+    return neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y
 
 
-    #plot the three pannel figure of target pixel
-    if True:
-        f, axes = plt.subplots(3, 1)
+def get_fit_result(neighor_flux_matrix, target_flux, fit_coe):
+    fit_flux = np.dot(neighor_flux_matrix, fit_coe)
+    ratio = np.divide(target_flux, fit_flux)
+    dev = ratio - 1.0
+    rms = np.sqrt(np.mean(dev**2, axis=0))
 
-        axes[0].plot(time, target_flux[:, Pixel])
-        plt.setp( axes[0].get_xticklabels(), visible=False)
-        plt.setp( axes[0].get_yticklabels(), visible=False)
-        axes[0].set_ylabel("flux of tpf")
+    return fit_flux, ratio, rms
 
-        fit_flux = np.dot(neighor_flux_matrix, result[0])
-        axes[1].plot(time, fit_flux[:, Pixel])
-        plt.setp( axes[1].get_xticklabels(), visible=False)
-        plt.setp( axes[1].get_yticklabels(), visible=False)
-        axes[1].set_ylabel("flux of fit")
-        
-        ratio = np.divide(target_flux, fit_flux)
-        
-        result.append((np.mean(ratio[Fake_Po:Fake_Po+20, :], axis=0)-1.004)/0.004)
-        axes[2].plot(time, np.divide(target_flux[:, Pixel], fit_flux[:, Pixel]))
-        axes[2].set_ylim(0.990,1.010)
-        axes[2].set_xlabel("time")
-        axes[2].set_ylabel("ratio of data and fit")
-        #sin = 1+0.004*np.sin(12*np.pi*(time-time[0])/(time[-1]-time[0]))
-        #axes[2].plot(time, sin, color='red')
+def plot_threepannel(target_flux, neighor_flux_matrix, time, fit_coe, prefix, title, fake=False):
+    f, axes = plt.subplots(3, 1)
+    
+    axes[0].plot(time, target_flux[:, Pixel])
+    plt.setp( axes[0].get_xticklabels(), visible=False)
+    plt.setp( axes[0].get_yticklabels(), visible=False)
+    axes[0].set_ylabel("flux of tpf")
+    
+    fit_flux = np.dot(neighor_flux_matrix, fit_coe)
+    axes[1].plot(time, fit_flux[:, Pixel])
+    plt.setp( axes[1].get_xticklabels(), visible=False)
+    plt.setp( axes[1].get_yticklabels(), visible=False)
+    axes[1].set_ylabel("flux of fit")
+    
+    ratio = np.divide(target_flux, fit_flux)
+    
+    result.append((np.mean(ratio[Fake_Po:Fake_Po+20, :], axis=0)-1.004)/0.004)
+    axes[2].plot(time, np.divide(target_flux[:, Pixel], fit_flux[:, Pixel]))
+    axes[2].set_ylim(0.999,1.001)
+    axes[2].set_xlabel("time")
+    axes[2].set_ylabel("ratio of data and fit")
+    #sin = 1+0.004*np.sin(12*np.pi*(time-time[0])/(time[-1]-time[0]))
+    #axes[2].plot(time, sin, color='red')
+    if fake:
         axes[2].axhline(y=1.004,xmin=0,xmax=3,c="red",linewidth=0.5,zorder=0)
+    
+    plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
+                        wspace=0, hspace=0)
+    plt.suptitle('%s'%title)
+    plt.savefig('%s.png'%prefix)
+    plt.clf()
 
-        plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
-                            wspace=0, hspace=0)
-        plt.suptitle('Kepler %d Quarter %d Pixel(%d,%d) \n Fit Source[Initial:%d Number:%d CCD:%r] RMS Deviation:%f'%(origin_tpf.ktc_kepler_id, origin_tpf.sci_data_quarter, pixel_y, pixel_x, offset+1, neighor_num, ccd, result[2][Pixel]))
-        plt.savefig('fit(%d,%d)_%d_%d_ccd%rTran_reg%.0e.png'%(pixel_y, pixel_x, offset+1,neighor_num,ccd, l2))
-        plt.clf()
-
+def print_coe(fit_coe, neighor_kid, neighor_kplr_maskes, prefix, rms, constant=False):
     #print the fitting coefficient
-    f = open('coe(2,4)_%d_%d_ccd%r.dat'%(offset+1,neighor_num,ccd), 'w')
+    f = open('%s.dat'%prefix, 'w')
     loc = 0
-    for n in range(0, neighor_num):
+    for n in range(0, len(neighor_kid)):
         kplr_mask = neighor_kplr_maskes[n].flatten()
+        length = np.sum(kplr_mask>0)
         #coe = result[0][:, Pixel]
         coe = np.zeros_like(kplr_mask, dtype=float)
         #coe = np.zeros_like(neighor_pixel_maskes[n], dtype=float)
         #coe = np.ma.masked_equal(coe,0)
-        coe[kplr_mask>0] = result[0][loc:loc+neighor_fluxes[n].shape[1], Pixel]
-        loc += neighor_fluxes[n].shape[1]
-        coe = coe.reshape((neighor_pixel_maskes[n].shape[1],neighor_pixel_maskes[n].shape[2]))
+        coe[kplr_mask>0] = fit_coe[loc:loc+length, Pixel]
+        loc += length
+        coe = coe.reshape((neighor_kplr_maskes[n].shape[0], neighor_kplr_maskes[n].shape[1]))
 
         f.write('fit coefficient of the pixels of kepler %d\n'%neighor_kid[n])
         f.write('================================================\n')
@@ -283,132 +275,256 @@ def neighor_fit(kic, quarter, neighor_num=1, offset=0, ccd=True, l2=0, plot=True
                 f.write('%8.5f   '%coe[i,j])
             f.write('\n')
         f.write('================================================\n')
-    f.write('RMS Deviation:%f'%result[2][Pixel])
+    if constant:
+        f.write('constant coefficient\n %8.5f\n'%fit_coe[fit_coe.shape[0]-1, Pixel])
+        f.write('================================================\n')
+    f.write('RMS Deviation:%f'%rms)
     f.close()
-    return result
 
 if __name__ == "__main__":
+#bias vs number of parameters
     if False:
-        loop_num = np.arange(20)
-        neighor_num = np.arange(20)+1
-        ratio = np.empty_like(neighor_num, dtype=float)
-        option = [(False, False, 'bs'), (True, False, 'gs'), (False, True, 'rs'), (True, True, 'ys')]
-        for opt in option:
-            normal, test, color = opt
-            for i in loop_num:
-                result = neighor_fit(5088536, 5, i, 0, True, 0, normal, test)
-                ratio[i] = result[4][Pixel]
-                neighor_num[i] = result[0].shape[0]
-                print ratio[i]
-            plt.plot(neighor_num, ratio, color, label="normal:%r\n train-test:%r"%(normal, test))
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        l2 = 0
+        ccd = True
+        normal = False
+        
+        case_num = 20
+        
+        num_list = np.arange(case_num)
+        bias = np.empty_like(num_list, dtype=float)
+        
+        for num in range(1, case_num+1):
+            neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal, Fake_Po, Fake_Len)
+            num_list[num-1] = neighor_flux_matrix.shape[1]
+            result = lss.leastSquareSolve(neighor_flux_matrix, target_flux, None, l2, False)
+            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+            bias[num-1] = (np.mean(ratio[Fake_Po:Fake_Po+Fake_Len, Pixel]) - 1.004)/0.004
+
+        plt.plot(num_list, bias,'bs')
         #plt.title('test-train')
-        plt.xlabel("Number of parameters")
-        plt.ylabel("ratio of the fitting and true singal")
+        plt.xlabel('Number of parameters')
+        plt.ylabel('relative bias from the true singal')
         #plt.ylim(ymax=1)
         #plt.ylim(0.99, 1.01)
-        plt.savefig('paraNum-ratio_pixel(3,4)Compare.png')
-        plt.show()
-    if False:
-        neighor_num = np.arange(20)+1
-        ratio = np.empty_like(neighor_num, dtype=float)
-        for i in neighor_num:
-            result = neighor_fit(5088536, 5, i, 0, True, 0)
-            ratio[i-1] = result[4][Pixel]
-            neighor_num[i-1] = result[0].shape[0]
-            print ratio[i-1]
-        plt.plot(neighor_num,ratio,'bs')
-        #plt.title('test-train')
-        plt.xlabel("Number of parameters")
-        plt.ylabel("ratio of the fitting and true singal")
-        #plt.ylim(ymax=1)
-        #plt.ylim(0.99, 1.01)
-        plt.savefig('paraNum-ratio_pixel(3,4).png')
+        plt.savefig('paraNum-bias_pixel(3,4).png')
 
+#bias vs number of parameters in trian-and-test framework
     if False:
-        neighor_num = np.arange(12)+1
-        residuals = np.empty_like(neighor_num, dtype=float)
-        rms = np.empty_like(neighor_num, dtype=float)
-        for i in neighor_num:
-            result = neighor_fit(5088536, 5, i, 0, True, 0)
-            residuals[i-1] = result[1][Pixel]
-            rms[i-1] = result[3][Pixel]
-            neighor_num[i-1] = result[0].shape[0]
-        plt.clf()
-        plt.plot(neighor_num,residuals,'bs')
-        plt.xlabel("Number of parameters")
-        plt.ylabel("Total squared residuals")
-        plt.savefig('paraNum-res.png')
-        plt.clf()
-        plt.title('%d%% test data'%int(Percent*100))
-        plt.plot(neighor_num,rms,'bs')
-        plt.xlabel("Number of parameters")
-        plt.ylabel("RMS Deviation")
-        plt.ylim(ymin=0)
-        plt.savefig('paraNum-rms_pixel(2,4)_%.1f.png'%Percent)
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 20
+        l2 = 0
+        ccd = True
+        normal = False
+        
+        case_num = 20
+        
+        num_list = np.arange(case_num)
+        bias = np.empty_like(num_list, dtype=float)
+        
+        for num in range(1, case_num+1):
+            neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal, Fake_Po, Fake_Len)
+            train_mask = get_train_mask(neighor_flux_matrix.shape[0], Percent, True, Fake_Po-24, Fake_Len+48)
+            num_list[num-1] = neighor_flux_matrix.shape[1]
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], None, l2, False)
+            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+            bias[num-1] = (np.mean(ratio[Fake_Po:Fake_Po+Fake_Len, Pixel]) - 1.004)/0.004
+        
+        plt.plot(num_list, bias,'bs')
+        plt.title('test-and-train')
+        plt.xlabel('Number of parameters')
+        plt.ylabel('relative bias from the true singal')
+        plt.savefig('paraNum-bias_pixel(3,4)Test.png')
 
+#Single fitting plot
     if False:
-        neighor_fit(5088536, 5, 1, 0, True)
-        neighor_fit(5088536, 5, 2, 0, True)
-        neighor_fit(5088536, 5, 1, 1, True)
-        neighor_fit(5088536, 5, 1, 0, False)
-
-    if True:
-        result = neighor_fit(5088536, 5, 5, 0, True, 0, True, False, False)
-        print result[4][Pixel]
-
-    if False:
+        kid = 5088536
+        quarter = 5
+        offset = 0
         num = 5
-        strength = np.arange(10)
-        ratio = np.empty_like(strength, dtype=float)
-        for i in strength:
-            result = neighor_fit(5088536, 5, num, 0, True, (1e-18)*(10**strength[i]), True, True, False)
-            ratio[i] = result[4][Pixel]
-            strength[i] += -18
-        plt.clf()
-        plt.plot(strength, ratio, 'bs')
-        plt.title('Without normalization\n Number of stars:%d'%num)
-        plt.xlabel(r'Strength of Regularization($log \lambda$)')
-        plt.ylabel("bias from the true singal")
-        #plt.ylim(ymax=1.0)
-        plt.savefig('l2-bias_num%d_pixel(3,4)nor.png'%num)
+        l2 = 0
+        ccd = True
+        normal = False
+        neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal)
+        result = lss.leastSquareSolve(neighor_flux_matrix, target_flux, covar, l2, False)
+        fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+        title = 'Kepler %d Quarter %d Pixel(%d,%d) L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] RMS Deviation:%f'%(kid, quarter, pixel_x, pixel_y, l2, offset+1, num, ccd, rms[Pixel])
+        file_prefix = 'fit(%d,%d)_%d_%d_reg%.0e_nor%r'%(pixel_x, pixel_y, offset+1, num, l2, normal)
+        plot_threepannel(target_flux, neighor_flux_matrix, time, result[0], file_prefix, title)
+        print_coe(result[0], neighor_kid, neighor_kplr_maskes, file_prefix, result[2][Pixel])
 
+#k-fold validation
     if False:
-        strength = np.arange(7)
-        rms = np.empty_like(strength, dtype=float)
-        for i in strength:
-            result = neighor_fit(5088536, 5, 5, 0, True, (1e-8)*(10**strength[i]))
-            rms[i] = result[2][Pixel]
-            strength[i] -= 8
-        plt.clf()
-        plt.plot(strength,rms,'bs')
-        plt.xlabel(r'Strength of Regularization($log \lambda$)')
-        plt.ylabel("RMS Deviation")
-        plt.ylim(ymin=0)
-        plt.savefig('l2-rms.png')
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        l2 = 0
+        ccd = True
+        normal = False
+        k = 15
+        
+        case_num = 40
+        
+        num_list = np.zeros(case_num)
+        rms_list = []
+        for num in range(1, case_num+1):
+            neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal)
+            num_list[num-1] = neighor_flux_matrix.shape[1]
+            mean_rms = 0
+            kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k)
+            for i in range(0, k):
+                result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, :], None, l2, False)
+                fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, :], result[0])
+                mean_rms += rms[Pixel]
+            mean_rms /= k
+            rms_list.append(mean_rms)
+            print 'done %d'%num
 
+        plt.plot(num_list, rms_list, 'bs')
+        plt.title('k-fold validation k=%d'%k)
+        plt.xlabel('Number of parameters')
+        plt.ylabel('RMS Deviation')
+        plt.savefig('rms-num_k%dr.png'%k)
+
+#signal bias vs l2 regularization
     if False:
-        neighor_num = np.arange(20)+1
-        para_num = np.empty_like(neighor_num)
-        print neighor_num
-        strength = np.arange(10)
-        ratio = np.empty((strength.shape[0], neighor_num.shape[0]), dtype=float)
-        for i in strength:
-            for j in neighor_num:
-                print(i, j)
-                result = neighor_fit(5088536, 5, j, 0, True, (10**strength[i]), True)
-                ratio[i, j-1] = result[4][Pixel]
-                para_num[j-1] = result[0].shape[0]
-        print ratio
-        plt.clf()
-        plt.imshow(ratio, aspect='auto', cmap=plt.get_cmap('Greys'))
-        #plt.title('Number of stars:%d'%num)
-        plt.ylabel(r'Strength of Regularization($log \lambda$)')
-        plt.xlabel("Number of parameters")
-        cbar = plt.colorbar()
-        x = np.arange(20)
-        y = np.arange(10)
-        plt.yticks(y, strength)
-        plt.xticks(x[0:-1:2], para_num[0:-1:2])
-        cbar.ax.set_ylabel('ratio of the fitting to true singal', rotation=270)
-        plt.savefig('l2-num-ratio_pixel(3,4).png')
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 20
+        l2 = 0
+        ccd = True
+        normal = False
 
+        strength = np.arange(8)
+        bias = np.empty_like(strength, dtype=float)
+        
+        neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal, Fake_Po, Fake_Len)
+        
+        for i in strength:
+            l2 = (1e3)*(10**strength[i])
+            result = lss.leastSquareSolve(neighor_flux_matrix, target_flux, None, l2, False)
+            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+            bias[i] = (np.mean(ratio[Fake_Po:Fake_Po+Fake_Len, Pixel]) - 1.004)/0.004
+            strength[i] += 3
+        
+        plt.clf()
+        plt.plot(strength, bias, 'bs')
+        plt.title('Number of stars:%d'%num)
+        plt.xlabel(r'Strength of Regularization($log \lambda$)')
+        plt.ylabel('relative bias from the true singal')
+        plt.savefig('l2-bias_num%d_pixel(3,4).png'%num)
+
+#signal with different location
+    if False:
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 40
+        l2 = 0
+        ccd = True
+        normal = False
+        
+        case_num = 22
+        
+        position_list = np.arange(case_num)
+        bias = np.empty_like(position_list, dtype=float)
+        
+        for i in range(0, case_num):
+            position = Fake_Len*2+i*200
+            neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len)
+            position_list[i] = time[position]
+            result = lss.leastSquareSolve(neighor_flux_matrix, target_flux, None, l2, False)
+            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+            bias[i] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - 1.004)/0.004
+        
+        plt.clf()
+        plt.plot(position_list, bias, 'bs')
+        plt.title('Number of stars:%d'%num)
+        plt.xlabel('location of the signal(time[BKJD])')
+        plt.ylabel('relative bias from the true singal')
+        plt.savefig('loc-bias_num%d_pixel(3,4).png'%num)
+
+#signal with different location and train-and-test framework
+    if False:
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 5
+        l2 = 0
+        ccd = True
+        normal = False
+        
+        case_num = 22
+        
+        position_list = np.arange(case_num)
+        bias = np.empty_like(position_list, dtype=float)
+        
+        for i in range(0, case_num):
+            position = Fake_Len*2+i*200
+            neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len)
+            position_list[i] = time[position]
+            train_mask = get_train_mask(neighor_flux_matrix.shape[0], Percent, True, position-24, Fake_Len+48)
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], None, l2, False)
+            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+            bias[i] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - 1.004)/0.004
+        
+        plt.clf()
+        plt.plot(position_list, bias, 'bs')
+        plt.title('Number of stars:%d \n trian-and-test'%num)
+        plt.xlabel('location of the signal(time[BKJD])')
+        plt.ylabel('relative bias from the true singal')
+        plt.savefig('loc-bias_num%d_pixel(3,4)Test.png'%num)
+
+#bias from 1 with different location and train-and-test framework
+    if False:
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 5
+        l2 = 0
+        ccd = True
+        normal = False
+        
+        case_num = 22
+        
+        position_list = np.arange(case_num)
+        bias = np.empty_like(position_list, dtype=float)
+        
+        for i in range(0, case_num):
+            position = Fake_Len*2+i*200
+            neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal)
+            position_list[i] = time[position]
+            train_mask = get_train_mask(neighor_flux_matrix.shape[0], Percent, True, position-24, Fake_Len+48)
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], None, l2, False)
+            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+            bias[i] = np.mean(ratio[position:position+Fake_Len, Pixel]) - 1
+        
+        plt.clf()
+        plt.plot(position_list, bias, 'bs')
+        plt.title('Number of stars:%d \n trian-and-test with no signal'%num)
+        plt.xlabel('location of the signal(time[BKJD])')
+        plt.ylabel('bias from 1')
+        plt.savefig('loc-bias_num%d_pixel(3,4)noSignalTest.png'%num)
+
+#Single fitting plot with normalization
+    if True:
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 5
+        l2 = 0
+        ccd = True
+        normal = True
+        constant = True
+        neighor_flux_matrix, target_flux, covar, time, neighor_kid, neighor_kplr_maskes, epoch_mask, pixel_x, pixel_y = get_fit_matrix(kid, quarter, num, offset, ccd, normal, constant)
+        result = lss.leastSquareSolve(neighor_flux_matrix, target_flux, covar, l2, False)
+        fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
+        title = 'Kepler %d Quarter %d Pixel(%d,%d) L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] RMS Deviation:%f'%(kid, quarter, pixel_x, pixel_y, l2, offset+1, num, ccd, rms[Pixel])
+        file_prefix = 'fit(%d,%d)_%d_%d_reg%.0e_nor%r_cons%r'%(pixel_x, pixel_y, offset+1, num, l2, normal, constant)
+        plot_threepannel(target_flux, neighor_flux_matrix, time, result[0], file_prefix, title, False)
+        print_coe(result[0], neighor_kid, neighor_kplr_maskes, file_prefix, result[2][Pixel], constant)
