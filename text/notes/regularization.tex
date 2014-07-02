@@ -1,0 +1,101 @@
+\documentclass[]{article}
+\usepackage{amsmath}
+\usepackage[a4paper]{geometry}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage[colorlinks=false, pdfborder={0 0 0}]{hyperref}
+\usepackage{cleveref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+\begin{document}
+
+\title{Regularized Optimization}
+\author{Dun Wang}
+\date{Today}
+\maketitle
+
+\section{L2 Regularization}
+
+In PLM, we need to do the L2 form regularized optimization as following:
+
+\begin{align*}
+  I_{mn}^{*}=\sum_{m' \in M_{m}} a_{mnm'}I_{m'n'}
+\end{align*}
+
+\begin{align*}
+  \chi^2_{mn}    = \sum_{n'\in{N}_n} \frac{[I_{mn'} - I^{\ast}_{mnn'}]^2}{\sigma^2_{mn'}} 
+		+ \sum_{m'\in{M}_m} \frac{a_{mnm'}^2}{\Sigma^2}
+\end{align*}
+\\
+where $\sum_{m' \in {M}_m} \frac{a_{mnm'}^2}{\Sigma^2}$ is the L2 regularization term and $\frac{1}{\Sigma^2}$ is the regularization strength
+
+
+\section{Linear Algerbra}
+Take derivative to the $\chi^2$ equation with respect to $a_{mnk}$,  we can get the normal equation with L2 regualrization:
+ 
+\begin{align*}
+  0   = \sum_{n'\in{N}_n} \frac{1}{\sigma^2_{mn'}}[I_{mn'} -  \sum_{m'\in{M}_m}a_{mnm'}I_{m'n'}]I_{kn'}
+                 + \sum_{m'\in{M}_m} \frac{a_{mnk}}{\Sigma^2}
+\end{align*}
+\\
+where $k \in{M}_m$
+\\
+\\
+Construct the matrix:
+\\
+\begin{align*}
+A=
+ \begin{pmatrix}
+  I_{1,1} & I_{1,2} & \cdots & I_{1,m'} \\
+  I_{2,1} & I_{2,2} & \cdots & I_{2,m'} \\
+  \vdots  & \vdots  & \ddots & \vdots  \\
+  I_{n,1} & I_{n,2} & \cdots & I_{n,m'}
+ \end{pmatrix}
+\end{align*}
+
+\begin{align*}
+C = 
+ \begin{pmatrix}
+  \sigma^2_{1,1} & 0 & \cdots & 0 \\
+  0 & \sigma^2_{2,2} & \cdots & 0 \\
+  \vdots  & \vdots  & \ddots & \vdots  \\
+  0 & 0& \cdots & \sigma^2_{n,n}
+ \end{pmatrix}
+\end{align*}
+
+\begin{align*}
+Y = 
+ \begin{pmatrix}
+  I_{1,1} & I_{1,2} & \cdots & I_{1,m}\\
+  I_{2,1} & I_{2,2} & \cdots & I_{2,m} \\
+  \vdots  & \vdots  & \ddots & \vdots  \\
+  I_{n,1}& 0& \cdots & I_{n,m}
+ \end{pmatrix}
+\end{align*}
+
+\begin{align*}
+X=
+ \begin{pmatrix}
+  a_{1,1} & a_{1,2} & \cdots & a_{1,n} \\
+  a_{2,1} & a_{2,2} & \cdots & a_{2,n} \\
+  \vdots  & \vdots  & \ddots & \vdots  \\
+  a_{m',1} & a_{m',2} & \cdots & a_{m',n}
+ \end{pmatrix}
+\end{align*}
+\\
+The equation is equivalent to:
+\begin{align*}
+(A^TC^{-1}A+\frac{1}{\Sigma^2}I)X &= A^TC^{-1}Y
+\end{align*}
+\\
+Solve the linear system above, we can get the regularized optimization parameter set:
+\begin{align*}
+X &=(A^TC^{-1}A+\frac{1}{\Sigma^2}I)^{-1} A^TC^{-1}Y
+\end{align*}
+
+
+\end{document}
