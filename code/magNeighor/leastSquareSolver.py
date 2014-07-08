@@ -28,14 +28,11 @@ def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
         #adding l2 regularization
         i = np.identity(fa.shape[0])
         re = l2 * i
+        #print np.linalg.slogdet(fa+re)
         result = []
-        '''
-        print np.linalg.slogdet(fa+re)
-        print fa
-        '''
-        cho = linalg.cho_factor(fa+re)
-        result.append(linalg.cho_solve(cho, fy))
-        #result.append(np.linalg.solve(fa+re, fy))
+        #cho = linalg.cho_factor(fa+re)
+        #result.append(linalg.cho_solve(cho, fy))
+        result.append(np.linalg.solve(fa+re, fy))
         #calculating the residual and rms deviation
         fit = np.dot(a, result[0])
         res = y - fit
