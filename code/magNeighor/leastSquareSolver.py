@@ -30,10 +30,11 @@ def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
         re = l2 * i
         #print np.linalg.slogdet(fa+re)
         result = []
-        #cho = linalg.cho_factor(fa+re)
-        #result.append(linalg.cho_solve(cho, fy))
-        result.append(np.linalg.solve(fa+re, fy))
+        cho = linalg.cho_factor(fa+re)
+        result.append(linalg.cho_solve(cho, fy))
+        #result.append(np.linalg.solve(fa+re, fy))
         #calculating the residual and rms deviation
+        '''
         fit = np.dot(a, result[0])
         res = y - fit
         resSq = np.sum(res**2, axis=0)
@@ -42,6 +43,7 @@ def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
         dev = ratio - 1.0
         rms = np.sqrt(np.mean(dev**2, axis=0))
         result.append(rms)
+        '''
         return result
     else:
         #using svd
@@ -58,6 +60,7 @@ def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
                     coe[:,j] += s[i]*np.dot(u[:,i].T, y[:,j])/(s[i]**2+l2)*v.T[:,i]
         result = []
         result.append(coe)
+        '''
         fit = np.dot(a, result[0])
         res = y - fit
         resSq = np.sum(res**2, axis=0)
@@ -66,4 +69,5 @@ def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
         dev = ratio - 1.0
         rms = np.sqrt(np.mean(dev**2, axis=0))
         result.append(rms)
+        '''
         return result
