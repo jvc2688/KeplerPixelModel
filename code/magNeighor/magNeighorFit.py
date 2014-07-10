@@ -1,4 +1,5 @@
 import kplr
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -119,12 +120,17 @@ def load_data(tpf):
     
     return time, flux, pixel_mask, kplr_mask, epoch_mask, flux_err
 
-def get_kfold_train_mask(length, k):
-    step = length//k
+def get_kfold_train_mask(length, k, rand=False):
     train_mask = np.ones(length, dtype=int)
-    for i in range(0, k-1):
-        train_mask[i*step:(i+1)*step] = i
-    train_mask[(k-1)*step:] = k-1
+    if random:
+        for i in range(0, length):
+            group = random.randint(0, k-1)
+            train_mask[i] = group
+    else:
+        step = length//k
+        for i in range(0, k-1):
+            train_mask[i*step:(i+1)*step] = i
+        train_mask[(k-1)*step:] = k-1
     return train_mask
 
 def get_train_mask(total_length, percent=0.1, specify=False, initial=0, length=0):
@@ -411,11 +417,13 @@ if __name__ == "__main__":
         ccd = True
         normal = False
         constant = True
-        k = 10
+        k = 40
         case_num = 48
         
         num_list = np.zeros(case_num)
         rms_list = []
+        
+        kfold_mask = []
         for num in range(1, case_num+1):
             if num >= 49:
                 l2= 1
@@ -423,7 +431,8 @@ if __name__ == "__main__":
             covar = covar_list[Pixel]
             num_list[num-1] = neighor_flux_matrix.shape[1]
             mean_rms = 0
-            kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k)
+            if num == 1:
+                kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
             for i in range(0, k):
                 result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, :], None, l2, False)
                 fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, :], result[0])
@@ -437,7 +446,7 @@ if __name__ == "__main__":
         plt.title('k-fold validation k=%d L2 Reg: %.0e'%(k, l2))
         plt.xlabel('Number of parameters')
         plt.ylabel('RMS Deviation')
-        plt.savefig('rms-num_k%d_reg%.0e.png'%(k, l2), dpi=150)
+        plt.savefig('rms-num_k%d_reg%.0e_rand.png'%(k, l2), dpi=150)
 
 #k-fold validation for l2
     if False:
@@ -457,11 +466,11 @@ if __name__ == "__main__":
         
         neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
         covar = covar_list[Pixel]
+        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k)
         for case in range(1, case_num+1):
             l2 = (1e-3)*(10**(case-1))
             l2_list[case-1] = case-4
             mean_rms = 0
-            kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k)
             for i in range(0, k):
                 result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, :], None, l2, False)
                 fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, :], result[0])
@@ -924,7 +933,7 @@ if __name__ == "__main__":
         plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                             wspace=0, hspace=0)
         plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] RMS Deviation:%f'%(kid, quarter,  l2, offset+1, num, ccd, rms))
-        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_test.png'%(kid, offset+1, num, quarter, l2, normal), dpi=190)
+        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_point.png'%(kid, offset+1, num, quarter, l2, normal), dpi=190)
         plt.show()
         plt.clf()
     
@@ -972,7 +981,7 @@ if __name__ == "__main__":
             covar_mask = np.ones((length, length))
             covar_mask[train_mask==0, :] = 0
             covar_mask[:, train_mask==0] = 0
-            
+            '''
             covar = np.mean(covar_list, axis=0)
             covar = covar[covar_mask>0]
             train_length = np.sum(train_mask, axis=0)
@@ -987,7 +996,7 @@ if __name__ == "__main__":
                 covar = covar.reshape(train_length, train_length)
                 result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0, pixel], covar, l2, False)[0]
                 fit_flux[i*group_num:(i+1)*group_num, pixel] = np.dot(neighor_flux_matrix[group_mask == i], result)
-            '''
+            
             print('done%d'%i)
 
         if length > group*group_num:
@@ -998,6 +1007,7 @@ if __name__ == "__main__":
             covar_mask[train_mask==0, :] = 0
             covar_mask[:, train_mask==0] = 0
             
+            '''
             covar = np.mean(covar_list, axis=0)
             covar = covar[covar_mask>0]
             train_length = np.sum(train_mask, axis=0)
@@ -1012,7 +1022,7 @@ if __name__ == "__main__":
                 covar = covar.reshape(train_length, train_length)
                 result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0, pixel], covar, l2, False)[0]
                 fit_flux[group*group_num:, pixel] = np.dot(neighor_flux_matrix[group_mask == group], result)
-            '''
+
 
         light_curve = np.sum(target_flux, axis=1)
         fit_light_curve = np.sum(fit_flux, axis=1)
@@ -1059,7 +1069,7 @@ if __name__ == "__main__":
         plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                             wspace=0, hspace=0)
         plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] Test Region:%d-%d'%(kid, quarter,  l2, offset+1, num, ccd, -margin, margin))
-        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_train%d.png'%(kid, offset+1, num, quarter, l2, normal, group_num), dpi=190)
+        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_train%d_sep.png'%(kid, offset+1, num, quarter, l2, normal, group_num), dpi=190)
 
         plt.clf()
 
@@ -1099,7 +1109,7 @@ if __name__ == "__main__":
         plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                             wspace=0, hspace=0)
         plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] Test Region:%d-%d'%(kid, quarter,  l2, offset+1, num, ccd, -margin, margin))
-        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_train%d_line.png'%(kid, offset+1, num, quarter, l2, normal, group_num), dpi=190)
+        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_train%d_line_sep.png'%(kid, offset+1, num, quarter, l2, normal, group_num), dpi=190)
 
         plt.show()
         plt.clf()
