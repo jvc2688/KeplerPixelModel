@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.mlab as mlab
 import leastSquareSolver as lss
+from matplotlib.patches import Rectangle
 import time as tm
 
 client = kplr.API()
@@ -95,7 +96,7 @@ def load_data(tpf):
         time = hdu_data["time"]
         flux = hdu_data["flux"]
         flux_err = hdu_data["flux_err"]
-    print flux.shape
+    #print flux.shape
     pixel_mask = get_pixel_mask(flux, kplr_mask)
     epoch_mask = get_epoch_mask(pixel_mask)
     #flux[pixel_mask==0] = 0
@@ -157,7 +158,7 @@ def get_fake_data(target_flux, position, length, strength):
     return target_flux
 
 #fit the target kic with the pixels of the neighors in magnitude
-def get_fit_matrix(kic, quarter, neighor_num=1, offset=0, ccd=True, normal=False, fake_po=0, fake_len=0, fake_strength=0, constant=True):
+def get_fit_matrix(kic, quarter, neighor_num=1, offset=0, ccd=True, normal=False, fake_po=0, fake_len=0, fake_strength=0, constant=True, auto=False, pixel=Pixel):
     origin_star = client.star(kic)
     origin_tpf = client.target_pixel_files(ktc_kepler_id=origin_star.kepid, sci_data_quarter=quarter, ktc_target_type="LC")[0]
     neighor = find_mag_neighor(origin_tpf, neighor_num, offset, ccd)
@@ -179,6 +180,8 @@ def get_fit_matrix(kic, quarter, neighor_num=1, offset=0, ccd=True, normal=False
     target_flux = target_flux[epoch_mask>0]
     flux_err = flux_err[epoch_mask>0]
 
+    time_len = time.shape[0]
+
     #construct covariance matrix
     covar_list = np.zeros((flux_err.shape[1], flux_err.shape[0], flux_err.shape[0]))
     for i in range(0, flux_err.shape[1]):
@@ -187,7 +190,7 @@ def get_fit_matrix(kic, quarter, neighor_num=1, offset=0, ccd=True, normal=False
             #covar[j, j] = flux_err[j][i]
             covar_list[i, j, j] = flux_err[j][i]
         #covar_list.append(covar)
-    print covar_list.shape
+    #print covar_list.shape
     for i in range(0, len(neighor_fluxes)):
         neighor_fluxes[i] = neighor_fluxes[i][epoch_mask>0, :]
     #neighor_flux_matrix = neighor_flux_matrix[epoch_mask>0, :]
@@ -224,10 +227,24 @@ def get_fit_matrix(kic, quarter, neighor_num=1, offset=0, ccd=True, normal=False
     #add the constant level
     if constant:
         neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.ones((neighor_flux_matrix.shape[0], 1))), axis=1)
-    
 
-    pixel_x = (Pixel+1)%target_pixel_mask.shape[2]
-    pixel_y = (Pixel+1)//target_pixel_mask.shape[2]+1
+    if auto:
+        offset = 24
+        window = 72
+        auto_pixel = np.zeros((neighor_flux_matrix.shape[0], 2*window))
+        for i in range(offset+window, time_len-window-offset):
+            auto_pixel[i, 0:window] = target_flux[i-offset-window:i-offset, pixel]
+            auto_pixel[i, window:2*window] = target_flux[i+offset+1:i+offset+window+1, pixel]
+        for i in range(0, offset+window):
+            #auto_pixel[i, 0:2*window] = target_flux[i+offset+1:i+offset+2*window+1 , pixel]
+            auto_pixel[i, window:2*window] = target_flux[i+offset+1:i+offset+window+1 , pixel]
+        for i in range(time_len-window-offset, time_len):
+            #auto_pixel[i, 0:2*window] = target_flux[i-offset-2*window:i-offset , pixel]
+            auto_pixel[i, 0:window] = target_flux[i-offset-window:i-offset , pixel]
+        neighor_flux_matrix = np.concatenate((neighor_flux_matrix, auto_pixel), axis=1)
+
+    pixel_x = (pixel+1)%target_pixel_mask.shape[2]
+    pixel_y = (pixel+1)//target_pixel_mask.shape[2]+1
 
     return neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std
 
@@ -244,13 +261,14 @@ def get_fit_result(neighor_flux_matrix, target_flux, fit_coe, target_mean=None, 
 
 def plot_threepannel(target_flux, neighor_flux_matrix, time, fit_coe, prefix, title, fake=False, fake_po=0, fake_strength=0, target_mean=None, target_std=None, train_mask=None):
     f, axes = plt.subplots(3, 1)
-    
+    #region = Rectangle((time[1000], target_flux[1000, Pixel]-1000), time[1049]-time[1000], 2000, facecolor="grey", alpha=0.5)
     if train_mask is not None:
         axes[0].plot(time[train_mask>0], target_flux[train_mask>0, Pixel], '.b', markersize=1, label='train')
         axes[0].plot(time[train_mask==0], target_flux[train_mask==0, Pixel], '.r', markersize=1, label='test')
         axes[0].legend()
     else:
-        axes[0].plot(time, target_flux[:, Pixel])
+        axes[0].plot(time, target_flux[:, Pixel], '.b', markersize=1)
+        #axes[0].add_patch(region)
     plt.setp( axes[0].get_xticklabels(), visible=False)
     plt.setp( axes[0].get_yticklabels(), visible=False)
     axes[0].set_ylabel("flux of tpf")
@@ -390,65 +408,150 @@ if __name__ == "__main__":
         kid = 5088536
         quarter = 5
         offset = 0
-        num = 80
-        l2 = 1e-3
+        num = 220
+        l2 = 1e5
         ccd = True
         normal = False
         constant = True
         fake_strength = 0
+
+        Pixel = 17
         
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, fake_strength, constant)
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, fake_strength, constant, Pixel)
+        '''
+        train_mask = get_train_mask(neighor_flux_matrix.shape[0], Percent, True, 1000, 50)
+        print time[1000]
         covar = covar_list[Pixel]
-        print len(covar_list)
-        print np.max(covar)
+        covar = np.delete(covar, np.s_[1000:1050], 0)
+        covar = np.delete(covar, np.s_[1000:1050], 1)
+        result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, l2, False)
+        '''
+        print neighor_flux_matrix.shape
+        
+        covar = covar_list[Pixel]
         result = lss.leastSquareSolve(neighor_flux_matrix, target_flux, covar, l2, False)
         fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0], target_mean, target_std)
         title = 'Kepler %d Quarter %d Pixel(%d,%d) L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] RMS Deviation:%f'%(kid, quarter, pixel_x, pixel_y, l2, offset+1, num, ccd, rms[Pixel])
-        file_prefix = 'fit(%d,%d)_%d_%d_reg%.0e_nor%r_cons%r_norm'%(pixel_x, pixel_y, offset+1, num, l2, normal, constant)
+        file_prefix = 'fit(%d,%d)_%d_%d_reg%.0e_nor%r_cons%r_norm_tryTrain'%(pixel_x, pixel_y, offset+1, num, l2, normal, constant)
         plot_threepannel(target_flux, neighor_flux_matrix, time, result[0], file_prefix, title, False, 0, target_mean, target_std)
-        print_coe(result[0], neighor_kid, neighor_kplr_maskes, file_prefix, result[2][Pixel], constant)
+        print_coe(result[0], neighor_kid, neighor_kplr_maskes, file_prefix, rms[Pixel], constant)
 
 #k-fold validation
     if False:
         kid = 5088536
         quarter = 5
         offset = 0
-        l2 = 0
+        l2 = 1e5
         ccd = True
         normal = False
         constant = True
-        k = 40
-        case_num = 48
+        k = 10
+        case_num = 10
         
         num_list = np.zeros(case_num)
         rms_list = []
         
-        kfold_mask = []
-        for num in range(1, case_num+1):
-            if num >= 49:
-                l2= 1
-            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
-            covar = covar_list[Pixel]
-            num_list[num-1] = neighor_flux_matrix.shape[1]
-            mean_rms = 0
-            if num == 1:
-                kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
-            for i in range(0, k):
-                result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, :], None, l2, False)
-                fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, :], result[0])
-                mean_rms += rms[Pixel]
-            mean_rms /= k
-            rms_list.append(mean_rms)
-            print 'done %d'%num
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, 1, offset, ccd, normal, 0, 0, 0, constant)
+        
+        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
+        target_kplr_mask = target_kplr_mask.flatten()
+        pixel_list = np.arange(target_kplr_mask.shape[0])
+        
+        skip_num = 0
+        
+        #for Pixel in pixel_list:
+        Pixel = 17
+        if target_kplr_mask[Pixel] == 3:
+            skip_num += 1
+            if skip_num>0:
+                print Pixel
+                rms_list = []
+                for num in range(195, case_num+195):
+                    '''
+                    if num >= 49:
+                        l2= 1
+                    '''
+                    neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant, Pixel)
+                    num_list[num-195] = neighor_flux_matrix.shape[1]
+                    mean_rms = 0
+                    for i in range(0, k):
+                        covar_mask = np.ones(covar_list[Pixel].shape)
+                        covar_mask[kfold_mask==i, :] = 0
+                        covar_mask[:, kfold_mask==i] = 0
+                        covar = covar_list[Pixel]
+                        covar = covar[covar_mask>0]
+                        train_length = np.sqrt(covar.shape[0])
+                        covar = covar.reshape(train_length, train_length)
+                        result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2, False)
+                        fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                        mean_rms += rms
+                    mean_rms /= k
+                    rms_list.append(mean_rms)
+                    print 'done %d'%num
 
-        plt.plot(num_list, rms_list, 'bs')
-        plt.ylim(ymin=0)
-        plt.title('k-fold validation k=%d L2 Reg: %.0e'%(k, l2))
-        plt.xlabel('Number of parameters')
-        plt.ylabel('RMS Deviation')
-        plt.savefig('rms-num_k%d_reg%.0e_rand.png'%(k, l2), dpi=150)
+                plt.plot(num_list, rms_list, 'bs')
+                plt.ylim(ymin=0)
+                plt.title('k-fold validation k=%d L2 Reg: %.0e \n KID:%d Pixel(%d,%d)'%(k, l2, kid, pixel_x, pixel_y))
+                plt.xlabel('Number of parameters')
+                plt.ylabel('RMS Deviation')
+                plt.savefig('rms-num_k%d_reg%.0e_kic%d_(%d,%d)_t.png'%(k, l2, kid, pixel_x, pixel_y), dpi=150)
+                plt.clf()
 
 #k-fold validation for l2
+    if False:
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 200
+        l2 = 0
+        ccd = True
+        normal = False
+        constant = True
+        k = 10
+        case_num = 5
+        
+        l2_list = np.zeros(case_num)
+        rms_list = []
+        
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
+        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
+        target_kplr_mask = target_kplr_mask.flatten()
+        pixel_list = np.arange(target_kplr_mask.shape[0])
+        
+        #for Pixel in pixel_list:
+        Pixel = 17
+        if target_kplr_mask[Pixel] == 3:
+            print Pixel
+            rms_list = []
+            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant, Pixel)
+            for case in range(3, case_num+3):
+                l2 = (10**case)
+                l2_list[case-3] = case
+                mean_rms = 0
+                for i in range(0, k):
+                    covar_mask = np.ones(covar_list[Pixel].shape)
+                    covar_mask[kfold_mask==i, :] = 0
+                    covar_mask[:, kfold_mask==i] = 0
+                    covar = covar_list[Pixel]
+                    covar = covar[covar_mask>0]
+                    train_length = np.sqrt(covar.shape[0])
+                    print train_length
+                    covar = covar.reshape(train_length, train_length)
+                    result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2, False)
+                    fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                    mean_rms += rms
+                mean_rms /= k
+                rms_list.append(mean_rms)
+                print 'done %d'%case
+            
+            plt.plot(l2_list, rms_list, 'bs')
+            plt.ylim(ymin=0)
+            plt.title('k-fold validation k=%d Number of stars: %d \n KID:%d Pixel(%d,%d)'%(k, num, kid, pixel_x, pixel_y))
+            plt.xlabel(r'Strength of Regularization($log \lambda$)')
+            plt.ylabel('RMS Deviation')
+            plt.savefig('rms-l2_k%d_num%d_kic%d_(%d,%d).png'%(k, num, kid, pixel_x, pixel_y), dpi=150)
+
+#k-fold validation for l2 and num
     if False:
         kid = 5088536
         quarter = 5
@@ -458,33 +561,244 @@ if __name__ == "__main__":
         ccd = True
         normal = False
         constant = True
-        k = 40
-        case_num = 13
+        k = 10
+        l2_case_num = 5
+        num_case_num = 40
         
-        l2_list = np.zeros(case_num)
-        rms_list = []
+        l2_list = np.zeros(l2_case_num)
+        rms_list = np.zeros((l2_case_num, num_case_num))
+        
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, 1, offset, ccd, normal, 0, 0, 0, constant)
+        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
+        target_kplr_mask = target_kplr_mask.flatten()
+        pixel_list = np.arange(target_kplr_mask.shape[0])
+        
+        #for Pixel in pixel_list:
+        Pixel = 16
+        if target_kplr_mask[Pixel] == 3:
+            f = open('k-fold_l2_num_%d_ext2.dat'%Pixel, 'w')
+            print Pixel
+            for num in range(61, num_case_num+61):
+                if num >= 49:
+                    l2= 1
+                neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant, Pixel)
+                for case in range(3, l2_case_num+3):
+                    l2 = 10**(case)
+                    mean_rms = 0
+                    for i in range(0, k):
+                        covar_mask = np.ones(covar_list[Pixel].shape)
+                        covar_mask[kfold_mask==i, :] = 0
+                        covar_mask[:, kfold_mask==i] = 0
+                        covar = covar_list[Pixel]
+                        covar = covar[covar_mask>0]
+                        train_length = np.sqrt(covar.shape[0])
+                        covar = covar.reshape(train_length, train_length)
+                        result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2, False)
+                        fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                        mean_rms += rms
+                    mean_rms /= k
+                    rms_list[case-3, num-61] = mean_rms
+                    f.write('%f\t'%mean_rms)
+                    print 'l2 done %d'%case
+                f.write('\n')
+                print 'num done %d'%num
+
+            f.close()
+            np.save('k-fold_l2_num_%d_ext2.npy'%Pixel, rms_list)
+            plt.imshow(rms_list, cmap='Greys', aspect='auto', extent=[61,num_case_num+60,l2_case_num+1,3])
+            bar = plt.colorbar()
+            bar.set_label('RMS Deviation')
+            plt.title('k-fold validation k=%d \n KID:%d Pixel(%d,%d)'%(k, kid, pixel_x, pixel_y))
+            plt.ylabel(r'Strength of Regularization($log \lambda$)')
+            plt.xlabel('Number of stars')
+            plt.savefig('rms-l2_num_k%d_kic%d_%d(%d,%d).png'%(k, kid, Pixel, pixel_x, pixel_y), dpi=150)
+            plt.clf()
+
+#k-fold validation for l2 and num optimize
+    if False:
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 1
+        l2 = 10
+        ccd = True
+        normal = False
+        constant = True
+        k = 10
+        
+        num_last = 0
         
         neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
-        covar = covar_list[Pixel]
-        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k)
-        for case in range(1, case_num+1):
-            l2 = (1e-3)*(10**(case-1))
-            l2_list[case-1] = case-4
-            mean_rms = 0
-            for i in range(0, k):
-                result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, :], None, l2, False)
-                fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, :], result[0])
-                mean_rms += rms[Pixel]
-            mean_rms /= k
-            rms_list.append(mean_rms)
-            print 'done %d'%case
+        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
+        target_kplr_mask = target_kplr_mask.flatten()
+        pixel_list = np.arange(target_kplr_mask.shape[0])
+
+        mean_rms = 0
+        for i in range(0, k):
+            covar_mask = np.ones(covar_list[Pixel].shape)
+            covar_mask[kfold_mask==i, :] = 0
+            covar_mask[:, kfold_mask==i] = 0
+            covar = covar_list[Pixel]
+            covar = covar[covar_mask>0]
+            train_length = np.sqrt(covar.shape[0])
+            covar = covar.reshape(train_length, train_length)
+            result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2, False)
+            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+            mean_rms += rms
+        mean_rms /= k
         
-        plt.plot(l2_list, rms_list, 'bs')
-        plt.ylim(ymin=0)
-        plt.title('k-fold validation k=%d Number of stars: %d'%(k, num))
-        plt.xlabel(r'Strength of Regularization($log \lambda$)')
-        plt.ylabel('RMS Deviation')
-        plt.savefig('rms-l2_k%d_num%d.png'%(k, num), dpi=150)
+        
+        #for Pixel in pixel_list:
+        Pixel = 17
+        if target_kplr_mask[Pixel] == 3:
+            f = open('k-fold_l2_num_%d_optimize.dat'%Pixel, 'w')
+            print Pixel
+            while num<500:
+                neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
+                mean_rms_l2 = 0
+                for i in range(0, k):
+                    covar_mask = np.ones(covar_list[Pixel].shape)
+                    covar_mask[kfold_mask==i, :] = 0
+                    covar_mask[:, kfold_mask==i] = 0
+                    covar = covar_list[Pixel]
+                    covar = covar[covar_mask>0]
+                    train_length = np.sqrt(covar.shape[0])
+                    covar = covar.reshape(train_length, train_length)
+                    result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2*10, False)
+                    fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                    mean_rms_l2 += rms
+                mean_rms_l2 /= k
+                
+                neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num+1, offset, ccd, normal, 0, 0, 0, constant, Pixel)
+                mean_rms_num = 0
+                for i in range(0, k):
+                    covar_mask = np.ones(covar_list[Pixel].shape)
+                    covar_mask[kfold_mask==i, :] = 0
+                    covar_mask[:, kfold_mask==i] = 0
+                    covar = covar_list[Pixel]
+                    covar = covar[covar_mask>0]
+                    train_length = np.sqrt(covar.shape[0])
+                    covar = covar.reshape(train_length, train_length)
+                    result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2, False)
+                    fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                    mean_rms_num += rms
+                mean_rms_num /= k
+                
+                if (mean_rms<mean_rms_l2) and (mean_rms<mean_rms_num):
+                    break
+                elif (mean_rms-mean_rms_l2) < (mean_rms-mean_rms_num):
+                    num += 1
+                    mean_rms = mean_rms_num
+                else:
+                    l2 *= 10
+                    mean_rms = mean_rms_l2
+            
+                f.write('%d\t%d\t%.8f\n'%(num, l2, mean_rms))
+                print '%d\t%d\t%.8f\n'%(num, l2, mean_rms)
+            
+            f.close()
+                
+                
+#k-fold validation for l2 and num optimize method2
+    if False:
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 1
+        l2 = 10
+        ccd = True
+        normal = False
+        constant = True
+        auto = True
+        k = 10
+        
+        num_last = 0
+        
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
+        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
+        target_kplr_mask = target_kplr_mask.flatten()
+        pixel_list = np.arange(target_kplr_mask.shape[0])
+        
+        mean_rms = 10
+        
+        for Pixel in pixel_list:
+        #Pixel = 17
+            if target_kplr_mask[Pixel] == 3:
+                f = open('./k_fold_optimization/kic%d/auto/pixel%d_optimize.log'%(kid, Pixel), 'w')
+                print Pixel
+                num = 1
+                l2 = 10
+                mean_rms = 10
+                while num<500:
+                    neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num+1, offset, ccd, normal, 0, 0, 0, constant, auto, Pixel)
+                    mean_rms_num = 0
+                    for i in range(0, k):
+                        covar_mask = np.ones(covar_list[Pixel].shape)
+                        covar_mask[kfold_mask==i, :] = 0
+                        covar_mask[:, kfold_mask==i] = 0
+                        covar = covar_list[Pixel]
+                        covar = covar[covar_mask>0]
+                        train_length = np.sqrt(covar.shape[0])
+                        covar = covar.reshape(train_length, train_length)
+                        result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2, False)
+                        fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                        mean_rms_num += rms
+                    mean_rms_num /= k
+                    if mean_rms_num<mean_rms:
+                        num += 1
+                        mean_rms = mean_rms_num
+                        f.write('%d\t%d\t%.8f\n'%(num, l2, mean_rms))
+                        print '%d\t%d\t%.8f\n'%(num, l2, mean_rms)
+                    else:
+                        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant, auto, Pixel)
+                        mean_rms_l2 = 0
+                        for i in range(0, k):
+                            covar_mask = np.ones(covar_list[Pixel].shape)
+                            covar_mask[kfold_mask==i, :] = 0
+                            covar_mask[:, kfold_mask==i] = 0
+                            covar = covar_list[Pixel]
+                            covar = covar[covar_mask>0]
+                            train_length = np.sqrt(covar.shape[0])
+                            covar = covar.reshape(train_length, train_length)
+                            result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2*10, False)
+                            fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                            mean_rms_l2 += rms
+                        mean_rms_l2 /= k
+
+                        if mean_rms_l2<mean_rms:
+                            l2 *= 10
+                            mean_rms = mean_rms_l2
+                            f.write('%d\t%d\t%.8f\n'%(num, l2, mean_rms))
+                            print '%d\t%d\t%.8f\n'%(num, l2, mean_rms)
+                        else:
+                            ind = True
+                            for plus in range(2, 8):
+                                neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num+plus, offset, ccd, normal, 0, 0, 0, constant, auto, Pixel)
+                                mean_rms_num = 0
+                                for i in range(0, k):
+                                    covar_mask = np.ones(covar_list[Pixel].shape)
+                                    covar_mask[kfold_mask==i, :] = 0
+                                    covar_mask[:, kfold_mask==i] = 0
+                                    covar = covar_list[Pixel]
+                                    covar = covar[covar_mask>0]
+                                    train_length = np.sqrt(covar.shape[0])
+                                    covar = covar.reshape(train_length, train_length)
+                                    result = lss.leastSquareSolve(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i, Pixel], covar, l2, False)
+                                    fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix[kfold_mask==i, :], target_flux[kfold_mask==i, Pixel], result[0])
+                                    mean_rms_num += rms
+                                mean_rms_num /= k
+                                if mean_rms_num<mean_rms:
+                                    num += plus
+                                    mean_rms = mean_rms_num
+                                    ind = False
+                                    f.write('%d\t%d\t%.8f\n'%(num, l2, mean_rms))
+                                    print '%d\t%d\t%.8f\n'%(num, l2, mean_rms)
+                                    break
+                            if ind:
+                                break
+            
+                f.close()
+
 
 #signal bias vs l2 regularization
     if False:
@@ -650,63 +964,68 @@ if __name__ == "__main__":
         plot_range = (-1., 1.)
         
         position_list = np.arange(case_num)
-        bias = np.empty((case_num, 4), dtype=float)
+        bias = np.empty((case_num, 3), dtype=float)
         
-        num = 30
+        Pixel = 17
+        pixel_x = 0
+        pixel_y = 0
         
+        num = 86
         for i in range(0, case_num):
             position = Fake_Len*2+i*200
-            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len, fake_strength, constant)
+            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len, fake_strength, constant, Pixel)
             position_list[i] = time[position]
             train_mask = get_train_mask(neighor_flux_matrix.shape[0], Percent, True, position-24, Fake_Len+48)
             covar = covar_list[Pixel]
             covar = np.delete(covar, np.s_[position-24:position+Fake_Len+24], 0)
             covar = np.delete(covar, np.s_[position-24:position+Fake_Len+24], 1)
-            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, 0, False)
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, 1e2, False)
             fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
             bias[i, 0] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - fake_strength)/(fake_strength-1)
-            for j in range(1, 4):
-                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, (1e1)*(100**j), False)
+            for j in range(1, 3):
+                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, (1e2)*(100**j), False)
                 fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
                 bias[i, j] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - fake_strength)/(fake_strength-1)
         
-        f, axes = plt.subplots(4, 4)
+        f, axes = plt.subplots(3, 3)
         axes[0, 0].plot(position_list, bias[:, 0], 'bs')
-        axes[0, 0].set_title('l2-Reg:0')
+        axes[0, 0].set_title('l2-Reg:1e2')
         axes[0, 0].set_ylabel('Num of Stars: %d'%num)
         axes[0, 0].set_ylim(plot_range)
         plt.setp(axes[0, 0].get_xticklabels(), visible=False)
         axes[0, 1].plot(position_list, bias[:, 1], 'bs')
-        axes[0, 1].set_title('l2-Reg:1e3')
+        axes[0, 1].set_title('l2-Reg:1e4')
         axes[0, 1].set_ylim(plot_range)
         plt.setp(axes[0, 1].get_xticklabels(), visible=False)
         plt.setp(axes[0, 1].get_yticklabels(), visible=False)
         axes[0, 2].plot(position_list, bias[:, 2], 'bs')
-        axes[0, 2].set_title('l2-Reg:1e5')
+        axes[0, 2].set_title('l2-Reg:1e6')
         axes[0, 2].set_ylim(plot_range)
         plt.setp(axes[0, 2].get_xticklabels(), visible=False)
         plt.setp(axes[0, 2].get_yticklabels(), visible=False)
+        '''
         axes[0, 3].plot(position_list, bias[:, 3], 'bs')
         axes[0, 3].set_title('l2-Reg:1e7')
         axes[0, 3].set_ylim(plot_range)
         plt.setp(axes[0, 3].get_xticklabels(), visible=False)
         plt.setp(axes[0, 3].get_yticklabels(), visible=False)
+        '''
         print('done1')
 
-        num = 20
+        num = 56
         for i in range(0, case_num):
             position = Fake_Len*2+i*200
-            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len, fake_strength, constant)
+            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len, fake_strength, constant, Pixel)
             position_list[i] = time[position]
             train_mask = get_train_mask(neighor_flux_matrix.shape[0], Percent, True, position-24, Fake_Len+48)
             covar = covar_list[Pixel]
             covar = np.delete(covar, np.s_[position-24:position+Fake_Len+24], 0)
             covar = np.delete(covar, np.s_[position-24:position+Fake_Len+24], 1)
-            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, 0, False)
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, 1e2, False)
             fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
             bias[i, 0] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - fake_strength)/(fake_strength-1)
-            for j in range(1, 4):
-                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, (1e1)*(100**j), False)
+            for j in range(1, 3):
+                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, (1e2)*(100**j), False)
                 fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
                 bias[i, j] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - fake_strength)/(fake_strength-1)
 
@@ -722,26 +1041,28 @@ if __name__ == "__main__":
         axes[1, 2].set_ylim(plot_range)
         plt.setp(axes[1, 2].get_xticklabels(), visible=False)
         plt.setp(axes[1, 2].get_yticklabels(), visible=False)
+        '''
         axes[1, 3].plot(position_list, bias[:, 3], 'bs')
         axes[1, 3].set_ylim(plot_range)
         plt.setp(axes[1, 3].get_xticklabels(), visible=False)
         plt.setp(axes[1, 3].get_yticklabels(), visible=False)
+        '''
         print('done2')
 
-        num = 10
+        num = 26
         for i in range(0, case_num):
             position = Fake_Len*2+i*200
-            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len, fake_strength, constant)
+            neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, position, Fake_Len, fake_strength, constant, Pixel)
             position_list[i] = time[position]
             train_mask = get_train_mask(neighor_flux_matrix.shape[0], Percent, True, position-24, Fake_Len+48)
             covar = covar_list[Pixel]
             covar = np.delete(covar, np.s_[position-24:position+Fake_Len+24], 0)
             covar = np.delete(covar, np.s_[position-24:position+Fake_Len+24], 1)
-            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, 0, False)
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, 1e2, False)
             fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
             bias[i, 0] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - fake_strength)/(fake_strength-1)
-            for j in range(1, 4):
-                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, (1e1)*(100**j), False)
+            for j in range(1, 3):
+                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, (1e2)*(100**j), False)
                 fit_flux, ratio, rms = get_fit_result(neighor_flux_matrix, target_flux, result[0])
                 bias[i, j] = (np.mean(ratio[position:position+Fake_Len, Pixel]) - fake_strength)/(fake_strength-1)
 
@@ -757,12 +1078,15 @@ if __name__ == "__main__":
         axes[2, 2].set_ylim(plot_range)
         plt.setp(axes[2, 2].get_xticklabels(), visible=False)
         plt.setp(axes[2, 2].get_yticklabels(), visible=False)
+        '''
         axes[2, 3].plot(position_list, bias[:, 3], 'bs')
         axes[2, 3].set_ylim(plot_range)
         plt.setp(axes[2, 3].get_xticklabels(), visible=False)
         plt.setp(axes[2, 3].get_yticklabels(), visible=False)
+        '''
         print('done3')
 
+        '''
         num = 5
         for i in range(0, case_num):
             position = Fake_Len*2+i*200
@@ -796,7 +1120,7 @@ if __name__ == "__main__":
         axes[3, 3].set_ylim(plot_range)
         plt.setp(axes[3, 3].get_xticklabels(), visible=False)
         plt.setp(axes[3, 3].get_yticklabels(), visible=False)
-
+        '''
 
         fig = plt.gcf()
         fig.set_size_inches(18.5,20.5)
@@ -809,8 +1133,8 @@ if __name__ == "__main__":
         plt.suptitle('Signal Strength:%.4f Train-and-Test: %r'%(fake_strength, True))
 
 
-        plt.savefig('loc-bias_num%d_pixel(3,4)Test_cons%r_diff_str%.4f_range(-1,1).png'%(num, constant, fake_strength))
-        plt.show()
+        plt.savefig('loc-bias_num_KIC%d_pixel%d(%d,%d)Test_cons%r_diff_str%.4f_range(-1,1)_3.png'%(kid, Pixel, pixel_x, pixel_y, constant, fake_strength))
+        #plt.show()
 
 #bias from 1 with different location and train-and-test framework
     if False:
@@ -878,7 +1202,7 @@ if __name__ == "__main__":
         ccd = True
         normal = False
         constant = True
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, constant)
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
         
         target_kplr_mask = target_kplr_mask.flatten()
         covar_list = covar_list[target_kplr_mask == 3]
@@ -942,13 +1266,13 @@ if __name__ == "__main__":
         kid = 5088536
         quarter = 5
         offset = 0
-        num = 30
-        l2 = 0
+        num = 51
+        l2 = 1e4
         ccd = True
         normal = False
         constant = True
 
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, constant)
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant)
 
         target_kplr_mask = target_kplr_mask.flatten()
         covar_list = covar_list[target_kplr_mask == 3]
@@ -981,7 +1305,7 @@ if __name__ == "__main__":
             covar_mask = np.ones((length, length))
             covar_mask[train_mask==0, :] = 0
             covar_mask[:, train_mask==0] = 0
-            '''
+            
             covar = np.mean(covar_list, axis=0)
             covar = covar[covar_mask>0]
             train_length = np.sum(train_mask, axis=0)
@@ -996,7 +1320,8 @@ if __name__ == "__main__":
                 covar = covar.reshape(train_length, train_length)
                 result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0, pixel], covar, l2, False)[0]
                 fit_flux[i*group_num:(i+1)*group_num, pixel] = np.dot(neighor_flux_matrix[group_mask == i], result)
-            
+            '''
+            np.save('./kic%d/kic%d_num%d_reg%.0e_whole.npy'%(kid, kid, num, l2), fit_flux)
             print('done%d'%i)
 
         if length > group*group_num:
@@ -1007,13 +1332,15 @@ if __name__ == "__main__":
             covar_mask[train_mask==0, :] = 0
             covar_mask[:, train_mask==0] = 0
             
-            '''
+            
             covar = np.mean(covar_list, axis=0)
             covar = covar[covar_mask>0]
             train_length = np.sum(train_mask, axis=0)
             covar = covar.reshape(train_length, train_length)
             result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, l2, False)[0]
             fit_flux[group*group_num:] = np.dot(neighor_flux_matrix[group_mask == group], result)
+            np.save('./kic%d/kic%d_num%d_reg%.0e_whole.npy'%(kid, kid, num, l2), fit_flux)
+
             '''
             for pixel in range(0, target_flux.shape[1]):
                 covar = covar_list[pixel]
@@ -1022,11 +1349,14 @@ if __name__ == "__main__":
                 covar = covar.reshape(train_length, train_length)
                 result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0, pixel], covar, l2, False)[0]
                 fit_flux[group*group_num:, pixel] = np.dot(neighor_flux_matrix[group_mask == group], result)
-
+            '''
 
         light_curve = np.sum(target_flux, axis=1)
         fit_light_curve = np.sum(fit_flux, axis=1)
         light_curve_ratio = np.divide(light_curve, fit_light_curve)
+
+        plm_mean = np.mean(light_curve_ratio)
+        plm_std = np.std(light_curve_ratio)
 
         dev = light_curve_ratio - 1.
         rms = np.sqrt(np.mean(dev**2, axis=0))
@@ -1040,9 +1370,12 @@ if __name__ == "__main__":
         plt.setp( axes[0].get_yticklabels(), visible=False)
         axes[0].set_ylabel("light curve")
 
+        ylim = axes[0].get_ylim()
+
         axes[1].plot(time, fit_light_curve, '.b', markersize=1)
         plt.setp( axes[1].get_xticklabels(), visible=False)
         plt.setp( axes[1].get_yticklabels(), visible=False)
+        axes[1].set_ylim(ylim)
         axes[1].set_ylabel("fit")
 
         axes[2].plot(time, light_curve_ratio, '.b', markersize=2)
@@ -1061,57 +1394,132 @@ if __name__ == "__main__":
         flux = flux[inds]
         pdc_time = data["TIME"][inds]
 
+        mean = np.mean(flux)
+        flux = flux/mean
+
         axes[3].plot(pdc_time, flux, '.b', markersize=2)
         plt.setp( axes[3].get_yticklabels(), visible=False)
+        axes[3].set_ylim(0.999,1.001)
         axes[3].set_ylabel("pdc flux")
         axes[3].set_xlabel("time [BKJD]")
 
         plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                             wspace=0, hspace=0)
         plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] Test Region:%d-%d'%(kid, quarter,  l2, offset+1, num, ccd, -margin, margin))
-        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_train%d_sep.png'%(kid, offset+1, num, quarter, l2, normal, group_num), dpi=190)
+        plt.savefig('./kic%d/lightCurve_%d_%d_%d_q%d_reg%.0e_pdc.png'%(kid, kid, offset+1, num, quarter, l2), dpi=190)
 
         plt.clf()
 
 
-        f, axes = plt.subplots(4, 1)
-        axes[0].plot(time, light_curve)
+    if True:
+        t0 = tm.time()
+        kid = 5088536
+        quarter = 5
+        offset = 0
+        num = 84
+        l2 = 1e4
+        ccd = True
+        normal = False
+        constant = True
+        auto = True
+        
+        Pixel = 24
+
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, pixel_x, pixel_y, target_mean, target_std = get_fit_matrix(kid, quarter, num, offset, ccd, normal, 0, 0, 0, constant, auto, Pixel)
+        print (pixel_x,pixel_y, Pixel)
+
+        target_flux = target_flux[:, Pixel]
+        length = target_flux.shape[0]
+        group_num = 1
+        margin = 24
+        
+        group_mask = np.ones(length, dtype=int)
+        loc = 0
+        group = 0
+        while length-loc >= group_num:
+            group_mask[loc:loc+group_num] = group
+            loc += group_num
+            group += 1
+        group_mask[loc:] = group
+
+        fit_flux = np.empty_like(target_flux)
+
+        for i in range(0, group):
+            train_mask = np.ones(length)
+            if (margin <= i*group_num) and (length-(i+1)*group_num >= margin):
+                train_mask[i*group_num-margin:(i+1)*group_num+margin] = 0
+            elif margin > i*group_num:
+                train_mask[:(i+1)*group_num+margin] = 0
+            else:
+                train_mask[i*group_num-margin:] = 0
+            
+            covar_mask = np.ones((length, length))
+            covar_mask[train_mask==0, :] = 0
+            covar_mask[:, train_mask==0] = 0
+
+            covar = covar_list[Pixel]
+            covar = covar[covar_mask>0]
+            train_length = np.sum(train_mask, axis=0)
+            covar = covar.reshape(train_length, train_length)
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, l2, False)[0]
+            fit_flux[i*group_num:(i+1)*group_num] = np.dot(neighor_flux_matrix[group_mask == i], result)
+            np.save('./kic%d/auto/kic%d_(%d,%d)%d.npy'%(kid, kid, pixel_x, pixel_y, num), fit_flux)
+            print('done%d'%i)
+
+        if length > group*group_num:
+            train_mask = np.ones(length)
+            train_mask[group*group_num-margin:] = 0
+            
+
+            covar_mask = np.ones((length, length))
+            covar_mask[train_mask==0, :] = 0
+            covar_mask[:, train_mask==0] = 0
+            
+            covar = covar_list[Pixel]
+            covar = covar[covar_mask>0]
+            train_length = np.sum(train_mask, axis=0)
+            covar = covar.reshape(train_length, train_length)
+            result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], covar, l2, False)[0]
+            fit_flux[group*group_num:] = np.dot(neighor_flux_matrix[group_mask == group], result)
+
+        t = tm.time()
+        np.save('./kic%d/auto/kic%d_(%d,%d)%d.npy'%(kid, kid, pixel_x, pixel_y, num), fit_flux)
+        print(t-t0)
+        
+        f, axes = plt.subplots(3, 1)
+        axes[0].plot(time, target_flux, '.b', markersize=1)
         plt.setp( axes[0].get_xticklabels(), visible=False)
         plt.setp( axes[0].get_yticklabels(), visible=False)
-        axes[0].set_ylabel("light curve")
+        axes[0].set_ylabel("Data")
 
-        axes[1].plot(time, fit_light_curve)
+        axes[1].plot(time, fit_flux, '.b', markersize=1)
         plt.setp( axes[1].get_xticklabels(), visible=False)
         plt.setp( axes[1].get_yticklabels(), visible=False)
-        axes[1].set_ylabel("fit")
+        axes[1].set_ylabel("Fit")
 
-        axes[2].plot(time, light_curve_ratio)
-        plt.setp( axes[2].get_xticklabels(), visible=False)
+        ratio = np.divide(target_flux, fit_flux)
+
+        offset = 24
+        window = 72
+
+        axes[2].plot(time[0:offset+window], ratio[0:offset+window], '.k', markersize=2)
+        axes[2].plot(time[offset+window:length-offset-window], ratio[offset+window:length-offset-window], '.b', markersize=2)
+        axes[2].plot(time[length-offset-window:length], ratio[length-offset-window:length], '.r', markersize=2)
+        #plt.setp( axes[2].get_xticklabels(), visible=False)
         #plt.setp( axes[2].get_yticklabels(), visible=False)
         axes[2].set_ylim(0.999,1.001)
-        #axes[2].set_xlabel("time")
-        axes[2].set_ylabel("ratio")
+        axes[2].set_xlabel("time[BKJD]")
+        axes[2].set_ylabel("Ratio")
 
-        #plot the PDC curve
-        star = client.star(kid)
-        lc = star.get_light_curves(short_cadence=False)[quarter]
-        data = lc.read()
-        flux = data["PDCSAP_FLUX"]
-        inds = np.isfinite(flux)
-        flux = flux[inds]
-        pdc_time = data["TIME"][inds]
-
-        axes[3].plot(pdc_time, flux)
-        plt.setp( axes[3].get_yticklabels(), visible=False)
-        axes[3].set_ylabel("pdc flux")
-        axes[3].set_xlabel("time [BKJD]")
 
         plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                             wspace=0, hspace=0)
-        plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] Test Region:%d-%d'%(kid, quarter,  l2, offset+1, num, ccd, -margin, margin))
-        plt.savefig('lightCurve_%d_%d_%d_q%d_reg%.0e_nor%r_pdc_train%d_line_sep.png'%(kid, offset+1, num, quarter, l2, normal, group_num), dpi=190)
+        plt.suptitle('Kepler %d Quarter %d Pixel(%d,%d) L2-Reg %.0e \n Fit Source[Initial:%d Number:%d CCD:%r] Test Region:%d-%d'%(kid, quarter, pixel_x, pixel_y, l2, 1, num, ccd, -margin, margin))
+        plt.savefig('./kic%d/auto/kic%d_(%d,%d)_%d_%d_q%d_reg%.0e_auto%r_1.png'%(kid, kid, pixel_x, pixel_y, 1, num, quarter, l2, auto), dpi=190)
 
-        plt.show()
         plt.clf()
+
+
+
 
 
