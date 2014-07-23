@@ -1,0 +1,38 @@
+\documentclass[]{article}
+\usepackage{amsmath}
+\usepackage[a4paper]{geometry}
+\usepackage{graphicx}
+\usepackage{microtype}
+\usepackage{siunitx}
+\usepackage{booktabs}
+\usepackage[colorlinks=false, pdfborder={0 0 0}]{hyperref}
+\usepackage{cleveref}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+
+\begin{document}
+
+\title{Auto-Regression}
+\author{Dun Wang}
+\maketitle
+
+\section{Auto-Regression}
+ In additional to predicting the Kepler data point from the pixel values of other stars, we can also make the pixel values of the same stars but from different time as predictors, the auto-regression:
+
+\begin{align*}
+  I_{mn}^{*}=\sum_{m' \in M_{m}} a_{mnm'}I_{m'n} + \sum_{n' \in N_{n'}} a_{mnn'}I_{mn'}
+\end{align*}
+\\
+$N_{n'}$ is the time window we used as predictors from target pixel, $a_{mnn'}$ is the corresponding auto-regression coeffecient
+
+
+\section{Auto-Regression Window and Edge Effects}
+
+We want to make use of the data points both before and after the target data point at time t and also leave N data points around the target data point tobe untouched , where $\left|  t-t_N \right|>\Delta t$, $\Delta t$ is the transit duration, to make sure that the auto-regression will not fit out the transit signal. So basically, we use a window $[-\Delta, -N] \cup [N, \Delta]$ as the data set in auto-regression, where $\Delta$ is the largest time shifts, which should be decided by optimizing our objective
+\\
+On the edge of the data sets, to overcome the edge effects, we may only use the data points before or after the target data points, that is either window $[-\Delta, -N]$ or $[N, \Delta]$ as the auto-regression data set
+
+
+
+\end{document}
