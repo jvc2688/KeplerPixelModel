@@ -1,11 +1,11 @@
 SUFFIX   = pdf aux log dvi ps out
 
-NAME = regularization
+NAME = regularization Auto-Regression
 
-all: ${NAME}.pdf
+all: ${foreach name, ${NAME}, ${name}.pdf}
 
 %.pdf: %.tex
 	pdflatex $<
 
 clean:
-	rm -rf ${foreach suff, ${SUFFIX}, ${NAME}.${suff}}
+	rm -rf ${foreach name, ${NAME}, ${foreach suff, ${SUFFIX}, ${name}.${suff}}}
