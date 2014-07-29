@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import linalg
 
-def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
+def leastSquareSolve(a, y, covar=None, l2=0, svd=False, poly=0):
     if not(svd):
         #using normal equation
         fa, fy = [], []
@@ -26,9 +26,11 @@ def leastSquareSolve(a, y, covar=None, l2=0, svd=False):
             print np.linalg.slogdet(fa)
             '''
         #adding l2 regularization
-        i = np.identity(fa.shape[0])
+        len = fa.shape[0]
+        i = np.identity(len)
         re = l2 * i
-        #print np.linalg.slogdet(fa+re)
+        for j in range(1, poly+2):
+            re[len-j, len-j] = 0
         result = []
         cho = linalg.cho_factor(fa+re)
         result.append(linalg.cho_solve(cho, fy))
