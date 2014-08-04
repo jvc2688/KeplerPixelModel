@@ -314,7 +314,7 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
 
 def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration):
     target_kplr_mask = target_kplr_mask.flatten()
-    target_flux = target_flux[target_kplr_mask==3]
+    target_flux = target_flux[:, target_kplr_mask==3]
 
     target_lightcurve = np.sum(target_flux, axis=1)
     
@@ -476,7 +476,7 @@ if __name__ == "__main__":
         
         neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask = get_fit_matrix(target_tpf, neighor_tpfs, poly, auto, auto_offset, auto_window)
         
-        fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix)
+        #fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix)
 
         plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
         
