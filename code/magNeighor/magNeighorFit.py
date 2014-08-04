@@ -312,7 +312,7 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
     for i in range(0, thread_num):
         os.remove('./%stmp%d.npy'%(prefix, i))
 
-def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, epoch_mask, time, margin, prefix, transit_time, period, transit_duration):
+def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration):
     target_kplr_mask = target_kplr_mask.flatten()
     target_flux = target_flux[target_kplr_mask==3]
 
@@ -478,7 +478,7 @@ if __name__ == "__main__":
         
         fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix)
 
-        plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
+        plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
         
 
 
