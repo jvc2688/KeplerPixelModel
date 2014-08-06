@@ -218,6 +218,8 @@ def get_fit_matrix(target_tpf, neighor_tpfs, poly=0, auto=False, offset=0, windo
 
 def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix):
     target_kplr_mask = target_kplr_mask.flatten()
+    target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
+
     optimal_len = np.sum(target_kplr_mask==3)
     print optimal_len
     target_flux = target_flux[:, target_kplr_mask==3]
@@ -314,6 +316,7 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
 
 def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration):
     target_kplr_mask = target_kplr_mask.flatten()
+    target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
     target_flux = target_flux[:, target_kplr_mask==3]
 
     target_lightcurve = np.sum(target_flux, axis=1)
@@ -447,8 +450,6 @@ def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_
     plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e poly:%d\n Fit Source[Initial:%d Number:%d CCD:%r] Test Region:%d-%d'%(kid, quarter, l2, poly, offset+1, num, ccd, -margin, margin))
     plt.savefig('./%s.png'%prefix, dpi=190)
 
-
-
 if __name__ == "__main__":
 
 #generate lightcurve train-and-test, multithreads
@@ -457,7 +458,7 @@ if __name__ == "__main__":
         kid = 5088536
         quarter = 5
         offset = 0
-        num = 126
+        num = 90
         l2 = 1e5
         ccd = True
         auto = False
@@ -475,8 +476,8 @@ if __name__ == "__main__":
         target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, num, offset=0, ccd=True)
         
         neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask = get_fit_matrix(target_tpf, neighor_tpfs, poly, auto, auto_offset, auto_window)
-        
-        #fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix)
+
+        fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix)
 
         plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
         
