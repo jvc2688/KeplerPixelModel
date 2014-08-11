@@ -9,6 +9,7 @@ from matplotlib.patches import Rectangle
 import time as tm
 import threading
 import os
+import math
 
 client = kplr.API()
 
@@ -33,55 +34,24 @@ def find_mag_neighor(kic, quarter, num, offset=0, ccd=True):
     else:
         stars_over = client.target_pixel_files(ktc_kepler_id="!=%d"%target_tpf.ktc_kepler_id, kic_kepmag=">=%f"%target_tpf.kic_kepmag, sci_data_quarter=target_tpf.sci_data_quarter, sci_channel="!=%d"%target_tpf.sci_channel, sort=("kic_kepmag", 1),ktc_target_type="LC", max_records=num+offset)
         stars_under = client.target_pixel_files(ktc_kepler_id="!=%d"%target_tpf.ktc_kepler_id, kic_kepmag="<=%f"%target_tpf.kic_kepmag, sci_data_quarter=target_tpf.sci_data_quarter, sci_channel="!=%d"%target_tpf.sci_channel, sort=("kic_kepmag", -1),ktc_target_type="LC", max_records=num+offset)
-    
+
+    print(len(stars_over), len(stars_under))
     tpfs = {}
-    
-    i=0
-    j=0
-    offset_list =[]
-    while len(tpfs) <num+offset:
-        while stars_over[i].ktc_kepler_id in tpfs:
-            i+=1
-        tmp_over = stars_over[i]
-        while stars_under[j].ktc_kepler_id in tpfs:
-            j+=1
-        tmp_under = stars_under[j]
-        if tmp_over.kic_kepmag-target_tpf.kic_kepmag > target_tpf.kic_kepmag-tmp_under.kic_kepmag:
-            tpfs[tmp_under.ktc_kepler_id] = tmp_under
-            j+=1
-            if len(tpfs)>offset:
-                pass
-            else:
-                offset_list.append(tmp_under.ktc_kepler_id)
-        elif tmp_over.kic_kepmag-target_tpf.kic_kepmag < target_tpf.kic_kepmag-tmp_under.kic_kepmag:
-            tpfs[tmp_over.ktc_kepler_id] = tmp_over
-            i+=1
-            if len(tpfs)>offset:
-                pass
-            else:
-                offset_list.append(tmp_over.ktc_kepler_id)
-        elif len(tpfs) < num+offset-1:
-            tpfs[tmp_under.ktc_kepler_id] = tmp_under
-            tpfs[tmp_over.ktc_kepler_id] = tmp_over
-            i+=1
-            j+=1
-            if len(tpfs)>offset+1:
-                pass
-            elif len(tpfs) == offset+1:
-                offset_list.append(tmp_under.ktc_kepler_id)
-            else:
-                offset_list.append(tmp_over.ktc_kepler_id)
-                offset_list.append(tmp_under.ktc_kepler_id)
-        else:
-            tpfs[tmp_over.ktc_kepler_id] = tmp_over
-            i+=1
-            if len(tpfs)>offset:
-                pass
-            else:
-                offset_list.append(tmp_over.ktc_kepler_id)
-    
-    for key in offset_list:
-        tpfs.pop(key)
+    target_kepmag = target_tpf.kic_kepmag
+
+    dtype = [('kic', int), ('bias', float), ('tpf', type(target_tpf))]
+    neighor_list = []
+    tpf_list = stars_over+stars_under
+    for tpf in tpf_list:
+        neighor_list.append((tpf.ktc_kepler_id, math.fabs(tpf.kic_kepmag-target_kepmag), tpf))
+
+    neighor_list = np.array(neighor_list, dtype=dtype)
+    neighor_list = np.sort(neighor_list, kind='mergesort', order='bias')
+
+    for i in range(offset, offset+num):
+        tmp_kic, tmp_bias, tmp_tpf = neighor_list[i]
+        tpfs[tmp_kic] = tmp_tpf
+        
     return target_tpf, tpfs
 
 #help function to find the pixel mask
@@ -217,6 +187,23 @@ def get_fit_matrix(target_tpf, neighor_tpfs, poly=0, auto=False, offset=0, windo
     return neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask
 
 def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix):
+    """
+    ## inputs:
+    - `target_flux` - target flux
+    - `target_kplr_mask` - kepler mask of the target star
+    - `neighor_flux_matrix` - fitting matrix of neighor flux
+    - `time` - array of time 
+    - `epoch_mask` - epoch mask
+    - `covar_list` - covariance list
+    - `margin` - size of the test region
+    - `poly` - number of orders of polynomials of time(zero order is the constant level)
+    - `l2` - strenght of L2 regularization strength
+    - `thread_num` - thread number
+    - `prefix` - output file's prefix
+    
+    ## outputs:
+    - .npy file - fitting fluxes of pixels
+    """
     target_kplr_mask = target_kplr_mask.flatten()
     target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
 
@@ -454,20 +441,19 @@ if __name__ == "__main__":
 
 #generate lightcurve train-and-test, multithreads
     if True:
-        t0 = tm.time()
         kid = 5088536
         quarter = 5
         offset = 0
-        num = 90
+        num = 200
         l2 = 1e5
         ccd = True
         auto = False
-        poly = 5
+        poly = 0
         auto_offset = 0
         auto_window = 0
-        margin = 24
+        margin = 48
         thread_num = 3
-        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%d_auto%r-%d-%d'%(kid, kid, quarter, offset+1, num, l2, poly, auto, auto_offset, auto_window)
+        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%d_auto%r-%d-%d_margin%d'%(kid, kid, quarter, offset+1, num, l2, poly, auto, auto_offset, auto_window, margin)
         
         transit_time = 182.10391
         period = 27.508682
@@ -481,7 +467,6 @@ if __name__ == "__main__":
 
         plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
         
-
 
 
 
