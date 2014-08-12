@@ -202,12 +202,12 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
     - `covar_list` - covariance list
     - `margin` - size of the test region
     - `poly` - number of orders of polynomials of time(zero order is the constant level)
-    - `l2` - strenght of L2 regularization strength
+    - `l2_vector` - array of L2 regularization strength
     - `thread_num` - thread number
     - `prefix` - output file's prefix
     
     ## outputs:
-    - .npy file - fitting fluxes of pixels
+    - prefix.npy file - fitting fluxes of pixels
     """
     target_kplr_mask = target_kplr_mask.flatten()
     target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
