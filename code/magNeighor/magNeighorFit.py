@@ -306,19 +306,20 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
     for i in range(0, thread_num):
         os.remove('./%stmp%d.npy'%(prefix, i))
 
-def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration):
+def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num):
     target_kplr_mask = target_kplr_mask.flatten()
     target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
     target_flux = target_flux[:, target_kplr_mask==3]
-
+    
+    #construct the lightcurve 
     target_lightcurve = np.sum(target_flux, axis=1)
     
     fit_pixel = np.load('./%s.npy'%prefix)
     fit_lightcurve = np.sum(fit_pixel, axis=1)
+    
     ratio = np.divide(target_lightcurve, fit_lightcurve)
     
-    print ratio
-    
+    #load and normalize the PDC lightcurve
     star = client.star(kid)
     lc = star.get_light_curves(short_cadence=False)[quarter]
     data = lc.read()
@@ -329,6 +330,7 @@ def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_
     pdc_mean = np.mean(flux)
     flux = flux/pdc_mean
     
+    #construct the running mean and std
     mean_list = np.zeros_like(epoch_mask, dtype=float)
     std_list = np.zeros_like(epoch_mask, dtype=float)
     pdc_mean_list = np.zeros_like(epoch_mask, dtype=float)
@@ -353,16 +355,19 @@ def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_
     pdc_mean_list = pdc_mean_list[inds]
     pdc_std_list = pdc_std_list[inds]
     
-    print mean_list
-    print pdc_mean_list
-    print std_list
-    print pdc_std_list
-    
     median_std = np.median(std_list)
     pdc_median_std = np.median(pdc_std_list)
     print median_std
     print pdc_median_std
     
+    
+    #get the transit information of the corressponding koi num
+    koi = client.koi(koi_num)
+    transit_time = koi.koi_time0bk
+    period = koi.koi_period
+    transit_duration = koi.koi_duration
+    
+    #find the transit locations of the koi num in lightcurve
     time_len = time.shape[0]
     transit_list = []
     while transit_time < time[-1]:
@@ -386,6 +391,7 @@ def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_
     pdc_transit_mask = transit_mask[inds]
     transit_mask = transit_mask[epoch_mask>0]
     
+    #calculate the signal to noise ratio
     signal = np.mean(ratio[transit_mask==1])-np.mean(ratio[transit_mask>=2])
     pdc_signal = np.mean(flux[pdc_transit_mask==1])-np.mean(flux[pdc_transit_mask>=2])
     depth = np.mean(ratio[transit_mask==1])- np.mean(ratio[transit_mask==3])
@@ -396,6 +402,7 @@ def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_
     sn = signal/median_std
     pdc_sn =pdc_signal/pdc_median_std
     
+    #plot the lightcurve
     transit_period = half_len*2*0.5
     
     f, axes = plt.subplots(4, 1)
@@ -460,9 +467,7 @@ if __name__ == "__main__":
         thread_num = 3
         prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%d_auto%r-%d-%d_margin%d'%(kid, kid, quarter, offset+1, num, l2, poly, auto, auto_offset, auto_window, margin)
         
-        transit_time = 182.10391
-        period = 27.508682
-        transit_duration = 6.1
+        koi_num = 282.01
         
         target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, num, offset=0, ccd=True)
         
@@ -470,7 +475,7 @@ if __name__ == "__main__":
 
         fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector, thread_num, prefix)
 
-        plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
+        plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
         
 
 
