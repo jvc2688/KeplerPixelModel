@@ -108,7 +108,7 @@ def get_kfold_train_mask(length, k, rand=False):
         train_mask[(k-1)*step:] = k-1
     return train_mask
 
-def get_fit_matrix(target_tpf, neighor_tpfs, poly=0, auto=False, offset=0, window=0):
+def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, window=0):
     """
     ## inputs:
     - `target_tpf` - target tpf
@@ -171,9 +171,13 @@ def get_fit_matrix(target_tpf, neighor_tpfs, poly=0, auto=False, offset=0, windo
         for i in range(0, offset+window):
             auto_pixel[i, window:2*window] = auto_flux[i+offset+1:i+offset+window+1]
         for i in range(epoch_len-window-offset, epoch_len):
-            auto_pixel[i, 0:window] = auto_flux[i-offset-window:i-offset]
+            auto_pixel[i, 0:window] = auto_flux[i-offset-window:i-offset] 
         auto_pixel = auto_pixel[epoch_mask>0, :]
         neighor_flux_matrix = np.concatenate((neighor_flux_matrix, auto_pixel), axis=1)
+        
+    #construct l2 vectors
+    l2_vector = np.ones(neighor_flux_matrix.shape[1])
+    l2_vector = np.concatenate((l2_vector, np.zeros(poly+1)), axis=0)
 
     #add polynomial terms
     time_mean = np.mean(time)
@@ -184,7 +188,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, poly=0, auto=False, offset=0, windo
 
     print neighor_flux_matrix.shape
 
-    return neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask
+    return neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector
 
 def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix):
     """
@@ -461,9 +465,9 @@ if __name__ == "__main__":
         
         target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, num, offset=0, ccd=True)
         
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask = get_fit_matrix(target_tpf, neighor_tpfs, poly, auto, auto_offset, auto_window)
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector = get_fit_matrix(target_tpf, neighor_tpfs, poly, auto, auto_offset, auto_window)
 
-        fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix)
+        fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2_vector, thread_num, prefix)
 
         plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
         
