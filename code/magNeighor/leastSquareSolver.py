@@ -1,75 +1,49 @@
+# -*- coding: utf-8 -*-
+
+from __future__ import division, print_function
+
+__all__ = ["linear_least_squares"]
+
 import numpy as np
 from scipy import linalg
 
-def leastSquareSolve(a, y, covar=None, l2=0, svd=False, poly=0):
-    if not(svd):
-        #using normal equation
-        fa, fy = [], []
-        if covar is None:
-            fy = np.dot(a.T, y)
-            fa = np.dot(a.T, a)
-        else:
-            icovar = np.zeros_like(covar)
-            for i in range(0, covar.shape[0]):
-                icovar[i, i] = 1./covar[i, i]
-            fy = np.dot(icovar, y)
-            fy = np.dot(a.T, fy)
-            fa = np.dot(icovar, a)
-            fa = np.dot(a.T, fa)
-            '''
-            print a.shape
-            print y.shape
-            print np.max(fa)
-            print np.min(fa)
-            print np.max(fy)
-            print np.min(fy)
-            print np.linalg.slogdet(fa)
-            '''
-        #adding l2 regularization
-        len = fa.shape[0]
-        i = np.identity(len)
-        re = l2 * i
-        for j in range(1, poly+2):
-            re[len-j, len-j] = 0
-        result = []
-        cho = linalg.cho_factor(fa+re)
-        result.append(linalg.cho_solve(cho, fy))
-        #result.append(np.linalg.solve(fa+re, fy))
-        #calculating the residual and rms deviation
-        '''
-        fit = np.dot(a, result[0])
-        res = y - fit
-        resSq = np.sum(res**2, axis=0)
-        result.append(resSq)
-        ratio = np.divide(y, fit)
-        dev = ratio - 1.0
-        rms = np.sqrt(np.mean(dev**2, axis=0))
-        result.append(rms)
-        '''
-        return result
+
+def linear_least_squares(A, y, yvar=None, l2=None):
+    """
+        Solve a linear system as fast as possible.
+        
+        :param A: ``(ndata, nbasis)``
+        The basis matrix.
+        
+        :param y: ``(ndata)``
+        The observations.
+        
+        :param yvar:
+        The observational variance of the points ``y``.
+        
+        :param l2:
+        The L2 regularization strength. Can be a scalar or a vector (of length
+        ``A.shape[1]``).
+        
+        """
+    # Incorporate the observational uncertainties.
+    if yvar is not None:
+        CiA = A / yvar[:, None]
+        Ciy = y / yvar[:, None]
     else:
-        #using svd
-        eps = np.finfo(float).eps
-        n = a.shape[0]
-        u, s, v = np.linalg.svd(a)
-        coe = np.zeros((a.shape[1],y.shape[1]))
-        max = np.amax(s)
-        for i in range(s.shape[0]):
-            if s[i] <= eps:
-                pass
-            else:
-                for j in range(coe.shape[1]):
-                    coe[:,j] += s[i]*np.dot(u[:,i].T, y[:,j])/(s[i]**2+l2)*v.T[:,i]
-        result = []
-        result.append(coe)
-        '''
-        fit = np.dot(a, result[0])
-        res = y - fit
-        resSq = np.sum(res**2, axis=0)
-        result.append(resSq)
-        ratio = np.divide(y, fit)
-        dev = ratio - 1.0
-        rms = np.sqrt(np.mean(dev**2, axis=0))
-        result.append(rms)
-        '''
-        return result
+        CiA = A
+        Ciy = y
+    
+    # Compute the pre-factor.
+    AT = A.T
+    ATA = np.dot(AT, CiA)
+    
+    # Incorporate any L2 regularization.
+    if l2 is not None:
+        if np.isscalar(l2):
+            l2 = l2 + np.zeros(A.shape[1])
+        ATA[np.diag_indices_from(ATA)] += l2
+    
+    # Solve the equations overwriting the temporary arrays for speed.
+    factor = linalg.cho_factor(ATA, overwrite_a=True)
+    return linalg.cho_solve(factor, np.dot(AT, Ciy), overwrite_b=True)
