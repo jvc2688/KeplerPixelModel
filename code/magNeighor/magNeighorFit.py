@@ -125,6 +125,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
     - `neighor_kplr_maskes` - kepler maskes of the neighor stars in the fitting matrix
     - `target_kplr_mask` - kepler mask of the target star
     - `epoch_mask` - epoch mask
+    - `l2_vector` - array of L2 regularization strength
     """
 
     time, target_flux, target_pixel_mask, target_kplr_mask, epoch_mask, flux_err= load_data(target_tpf)
@@ -176,7 +177,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
         neighor_flux_matrix = np.concatenate((neighor_flux_matrix, auto_pixel), axis=1)
         
     #construct l2 vectors
-    l2_vector = np.ones(neighor_flux_matrix.shape[1])
+    l2_vector = np.ones(neighor_flux_matrix.shape[1])*l2
     l2_vector = np.concatenate((l2_vector, np.zeros(poly+1)), axis=0)
 
     #add polynomial terms
@@ -190,7 +191,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
 
     return neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector
 
-def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2, thread_num, prefix):
+def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector=None, thread_num, prefix):
     """
     ## inputs:
     - `target_flux` - target flux
@@ -262,7 +263,7 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
                 tmp_covar = covar[covar_mask>0]
                 train_length = np.sum(train_mask, axis=0)
                 tmp_covar = tmp_covar.reshape(train_length, train_length)
-                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], tmp_covar, l2, False, poly)[0]
+                result = lss.leastSquareSolve(neighor_flux_matrix[train_mask>0], target_flux[train_mask>0], tmp_covar, l2_vector)
                 tmp_fit_flux[time_stp, :] = np.dot(neighor_flux_matrix[time_stp+self.time_initial, :], result)
                 np.save('./%stmp%d.npy'%(prefix, self.thread_id), tmp_fit_flux)
                 time_stp += 1
@@ -467,7 +468,7 @@ if __name__ == "__main__":
         
         neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector = get_fit_matrix(target_tpf, neighor_tpfs, poly, auto, auto_offset, auto_window)
 
-        fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, poly, l2_vector, thread_num, prefix)
+        fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector, thread_num, prefix)
 
         plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, transit_time, period, transit_duration)
         
