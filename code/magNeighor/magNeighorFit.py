@@ -467,7 +467,7 @@ if __name__ == "__main__":
         
         fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector, thread_num, prefix)
         
-        plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
+        plot_fit(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
         
 
 
