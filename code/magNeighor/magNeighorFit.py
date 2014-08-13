@@ -10,6 +10,7 @@ import time as tm
 import threading
 import os
 import math
+import preprocess
 
 client = kplr.API()
 
@@ -51,7 +52,7 @@ def find_mag_neighor(kic, quarter, num, offset=0, ccd=True):
     for i in range(offset, offset+num):
         tmp_kic, tmp_bias, tmp_tpf = neighor_list[i]
         tpfs[tmp_kic] = tmp_tpf
-        
+    
     return target_tpf, tpfs
 
 #help function to find the pixel mask
@@ -144,12 +145,6 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
     time = time[epoch_mask>0]
     target_flux = target_flux[epoch_mask>0]
     flux_err = flux_err[epoch_mask>0]
-
-    #construct covariance matrix
-    covar_list = np.zeros((flux_err.shape[1], flux_err.shape[0], flux_err.shape[0]))
-    for i in range(0, flux_err.shape[1]):
-        for j in range(0, flux_err.shape[0]):
-            covar_list[i, j, j] = flux_err[j][i]
     for i in range(0, len(neighor_fluxes)):
         neighor_fluxes[i] = neighor_fluxes[i][epoch_mask>0, :]
 
@@ -173,21 +168,23 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
             auto_pixel[i, 0:window] = auto_flux[i-offset-window:i-offset] 
         auto_pixel = auto_pixel[epoch_mask>0, :]
         neighor_flux_matrix = np.concatenate((neighor_flux_matrix, auto_pixel), axis=1)
-        
+
     #construct l2 vectors
-    l2_vector = np.ones(neighor_flux_matrix.shape[1], dtype=float)*l2
-    l2_vector = np.concatenate((l2_vector, np.zeros(poly+1)), axis=0)
+    pixel_num = neighor_flux_matrix.shape[1]
+    l2_vector = np.ones(pixel_num, dtype=float)*l2
 
     #add polynomial terms
-    time_mean = np.mean(time)
-    time_std = np.std(time)
-    nor_time = (time-time_mean)/time_std
-    p = np.polynomial.polynomial.polyvander(nor_time, poly)
-    neighor_flux_matrix = np.concatenate((neighor_flux_matrix, p), axis=1)
+    if poly is not None:
+        time_mean = np.mean(time)
+        time_std = np.std(time)
+        nor_time = (time-time_mean)/time_std
+        p = np.polynomial.polynomial.polyvander(nor_time, poly)
+        neighor_flux_matrix = np.concatenate((neighor_flux_matrix, p), axis=1)
+        l2_vector = np.concatenate((l2_vector, np.zeros(poly+1)), axis=0)
 
     print neighor_flux_matrix.shape
 
-    return neighor_flux_matrix, target_flux, flux_err, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector
+    return neighor_flux_matrix, target_flux, flux_err, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector, pixel_num
 
 def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector=None, thread_num=1, prefix="lightcurve"):
     """
@@ -298,7 +295,7 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
     for i in range(0, thread_num):
         os.remove('./%stmp%d.npy'%(prefix, i))
 
-def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num):
+def plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num):
     target_kplr_mask = target_kplr_mask.flatten()
     target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
     target_flux = target_flux[:, target_kplr_mask==3]
@@ -438,7 +435,7 @@ def plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_
 
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                         wspace=0, hspace=0)
-    plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e poly:%d\n Fit Source[Initial:%d Number:%d CCD:%r] Test Region:%d-%d'%(kid, quarter, l2, poly, offset+1, num, ccd, -margin, margin))
+    plt.suptitle('Kepler %d Quarter %d L2-Reg %.0e poly:%r\n Fit Source[Initial:%d Number Stars:%d Pixels:%d CCD:%r] Test Region:%d-%d'%(kid, quarter, l2, poly, offset+1, num, pixel_num, ccd, -margin, margin))
     plt.savefig('./%s.png'%prefix, dpi=190)
 
 if __name__ == "__main__":
@@ -448,7 +445,8 @@ if __name__ == "__main__":
         kid = 5088536
         quarter = 5
         offset = 0
-        num = 90
+        total_num = 300
+        filter_num = 108
         l2 = 1e5
         ccd = True
         auto = False
@@ -457,19 +455,19 @@ if __name__ == "__main__":
         auto_window = 0
         margin = 12
         thread_num = 3
-        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%d_auto%r-%d-%d_margin%d'%(kid, kid, quarter, offset+1, num, l2, poly, auto, auto_offset, auto_window, margin)
+        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d'%(kid, kid, quarter, offset+1, num, l2, poly, auto, auto_offset, auto_window, margin)
         
         koi_num = 282.01
         
-        target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, num, offset=0, ccd=True)
+        target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, total_num, offset=0, ccd=True)
         
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window)
-
-        print l2_vector
-
+        neighor_tpfs = preprocess.rms_filter(target_tpf, neighor_tpfs, filter_num)
+        
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window)
+        
         fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector, thread_num, prefix)
-
-        plot_fit(kid, quarter, l2, offset, num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
+        
+        plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
         
 
 
