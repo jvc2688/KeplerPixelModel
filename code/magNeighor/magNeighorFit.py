@@ -455,7 +455,7 @@ if __name__ == "__main__":
         auto_window = 0
         margin = 12
         thread_num = 3
-        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d'%(kid, kid, quarter, offset+1, num, l2, poly, auto, auto_offset, auto_window, margin)
+        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, margin)
         
         koi_num = 282.01
         
