@@ -593,6 +593,8 @@ if __name__ == "__main__":
         
         fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector, thread_num, prefix, transit_mask)
         
+        t = tm.time()
+
         plot_transit_part(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, auto, auto_offset, auto_window, transit_mask)
 
         #plot_fit(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
@@ -629,7 +631,7 @@ if __name__ == "__main__":
 
         l2_list = np.arange(8)
         num_list = (np.arange(5)+8)*10
-        window_list = (np.arange(5)+1)*20
+        window_list = (np.arange(5)+1)*12
 
         f = open('./k_fold_optimization/lightcurve_optimize.log', 'w')
         for total_num in num_list:
@@ -638,11 +640,11 @@ if __name__ == "__main__":
                 neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, 1., poly, auto, auto_offset, auto_window)
                 for l2 in l2_list:
                     l2 = math.pow(10, l2)
-                    l2_vector = l2_vector*l2
+                    tmp_l2_vector = l2_vector*l2
                     mean_rms = 0
                     for i in range(0, k):
                         tmp_covar = covar[kfold_mask!=i]
-                        result = lss.linear_least_squares(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i,:], tmp_covar, l2_vector)
+                        result = lss.linear_least_squares(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i,:], tmp_covar, tmp_l2_vector)
                         fit_flux = np.dot(neighor_flux_matrix[kfold_mask==i, :], result)
                         fit_lightcurve = np.sum(fit_flux, axis=1)
                         lightcurve = np.sum(target_flux[kfold_mask==i, :], axis=1)
