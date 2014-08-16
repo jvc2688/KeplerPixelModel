@@ -111,7 +111,7 @@ def get_kfold_train_mask(length, k, rand=False):
         train_mask[(k-1)*step:] = k-1
     return train_mask
 
-def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, window=0):
+def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, window=0, part=None):
     """
     ## inputs:
     - `target_tpf` - target tpf
@@ -131,7 +131,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
     - `l2_vector` - array of L2 regularization strength
     """
 
-    time, target_flux, target_pixel_mask, target_kplr_mask, epoch_mask, flux_err, column, row= load_data(target_tpf)
+    time, inter_target_flux, target_pixel_mask, target_kplr_mask, epoch_mask, flux_err, column, row= load_data(target_tpf)
 
     neighor_kid, neighor_fluxes, neighor_pixel_maskes, neighor_kplr_maskes = [], [], [], []
 
@@ -143,39 +143,62 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
         neighor_kplr_maskes.append(tmpResult[3])
         epoch_mask *= tmpResult[4]
     
-    #remove bad time point based on simulteanous epoch mask
-    time = time[epoch_mask>0]
-    target_flux = target_flux[epoch_mask>0]
-    flux_err = flux_err[epoch_mask>0]
-    for i in range(0, len(neighor_fluxes)):
-        neighor_fluxes[i] = neighor_fluxes[i][epoch_mask>0, :]
-
     #construt the neighor flux matrix
     neighor_flux_matrix = np.float64(np.concatenate(neighor_fluxes, axis=1))
-    target_flux = np.float64(target_flux)
+    inter_target_flux = np.float64(inter_target_flux)
 
     print neighor_flux_matrix.shape
-    #add autoregression terms
+
+    #add auto-regression terms
     if auto:
-        epoch_len = epoch_mask.shape[0]
         tmp_target_kplr_mask = target_kplr_mask.flatten()
         tmp_target_kplr_mask = tmp_target_kplr_mask[tmp_target_kplr_mask>0]
-        target_len = np.sum(tmp_target_kplr_mask==3)
-        print target_len
-        auto_flux = np.zeros((epoch_len, target_len))
-        auto_flux[epoch_mask>0] = target_flux[:, tmp_target_kplr_mask==3]
-        auto_pixel = np.zeros((epoch_len, 2*window*target_len))
-        auto_len = window*target_len
-        for i in range(offset+window, epoch_len-window-offset):
-            auto_pixel[i, 0:auto_len] = auto_flux[i-offset-window:i-offset, :].flatten()
-            auto_pixel[i, auto_len:2*auto_len] = auto_flux[i+offset+1:i+offset+window+1].flatten()
-        for i in range(0, offset+window):
-            auto_pixel[i, auto_len:2*auto_len] = auto_flux[i+offset+1:i+offset+window+1].flatten()
-        for i in range(epoch_len-window-offset, epoch_len):
-            auto_pixel[i, 0:auto_len] = auto_flux[i-offset-window:i-offset].flatten()
-        auto_pixel = auto_pixel[epoch_mask>0, :]
-        neighor_flux_matrix = np.concatenate((neighor_flux_matrix, auto_pixel), axis=1)
+        auto_flux = inter_target_flux[:, tmp_target_kplr_mask==3]
+        for i in range(offset+1, offset+window+1):
+            neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, i, axis=0)), axis=1)
+            neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, -i, axis=0)), axis=1)
+        epoch_mask[0:offset+window] = 0
+        epoch_mask[-offset+window:] = 0
 
+    #spilt lightcurve
+    epoch_len = epoch_mask.shape[0]
+    if part is not None:
+        #origin_target_flux = target_flux[epoch_mask>0]
+        #np.save('./origin_target_flux.npy', origin_target_flux)
+        split_point = []
+        i = 0
+        while i <epoch_len:
+            if epoch_mask[i] == 0:
+                i += 1
+            else:
+                j = i+1
+                while j<epoch_len and epoch_mask[j] == 0:
+                    j += 1
+                if j-i > 30:
+                    split_point.append(j)
+                i = j
+        print split_point
+        epoch_mask =  np.split(epoch_mask, split_point)[part-1]
+        time = np.split(time, split_point)[part-1]
+        inter_target_flux = np.split(inter_target_flux, split_point, axis=0)[part-1]
+        flux_err = np.split(flux_err, split_point, axis=0)[part-1]
+        neighor_flux_matrix = np.split(neighor_flux_matrix, split_point, axis=0)[part-1]
+
+        print (epoch_mask.shape, time.shape, inter_target_flux.shape, flux_err.shape, neighor_flux_matrix.shape)
+
+
+    #remove bad time point based on simulteanous epoch mask
+    time = time[epoch_mask>0]
+    target_flux = inter_target_flux[epoch_mask>0]
+    flux_err = flux_err[epoch_mask>0]
+    '''
+    for i in range(0, len(neighor_fluxes)):
+        neighor_fluxes[i] = neighor_fluxes[i][epoch_mask>0, :]
+    '''
+    neighor_flux_matrix = neighor_flux_matrix[epoch_mask > 0, :]
+
+    print neighor_flux_matrix.shape
+    
     #construct l2 vectors
     pixel_num = neighor_flux_matrix.shape[1]
     l2_vector = np.ones(pixel_num, dtype=float)*l2
@@ -278,9 +301,11 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
                 if epoch_mask[i] == 0:
                     continue
                 #fit the transit part
+                '''
                 if transit_mask[i] == 0:
                     time_stp += 1
                     continue
+                '''
                 train_mask = np.ones(total_length)
                 if i<margin:
                     train_mask[0:i+margin+1] = 0
@@ -335,6 +360,7 @@ def fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_m
         os.remove('./%stmp%d.npy'%(prefix, i))
 
 def plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num):
+    
     target_kplr_mask = target_kplr_mask.flatten()
     target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
     target_flux = target_flux[:, target_kplr_mask==3]
@@ -348,13 +374,17 @@ def plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, t
     ratio = np.divide(target_lightcurve, fit_lightcurve)
     
     #load and normalize the PDC lightcurve
+    
     star = client.star(kid)
     lc = star.get_light_curves(short_cadence=False)[quarter]
     data = lc.read()
     flux = data["PDCSAP_FLUX"]
+    flux = flux[0:epoch_mask.shape[0]]
     inds = np.isfinite(flux)
     flux = flux[inds]
     pdc_time = data["TIME"][inds]
+    pdc_time = pdc_time[0:epoch_mask.shape[0]]
+                
     pdc_mean = np.mean(flux)
     flux = flux/pdc_mean
     
@@ -440,6 +470,7 @@ def plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, t
     plt.setp( axes[0].get_yticklabels(), visible=False)
     axes[0].set_ylabel("Data")
     ylim = axes[0].get_ylim()
+    xlim = axes[0].get_xlim()
     axes[0].legend(loc=1, ncol=3, prop={'size':8})
     
     axes[1].plot(time, fit_lightcurve, '.b', markersize=1)
@@ -447,6 +478,7 @@ def plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, t
     plt.setp( axes[1].get_yticklabels(), visible=False)
     axes[1].set_ylabel("Fit")
     axes[1].set_ylim(ylim)
+    axes[1].set_xlim(xlim)
     
     axes[2].plot(time[transit_mask<2], ratio[transit_mask<2], '.b', markersize=2)
     axes[2].plot(time[transit_mask>=2], ratio[transit_mask>=2], '.k', markersize=2, label="Transit singal \n within %.1f hrs window"%transit_period)
@@ -456,8 +488,10 @@ def plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, t
     axes[2].set_ylim(0.999,1.001)
     axes[2].set_ylabel("Ratio")
 
-    axes[2].text(time[2000], 1.0006, 'S/N = %.3f'%sn)
+    axes[2].text(time[500], 1.0006, 'S/N = %.3f'%sn)
     axes[2].legend(loc=1, ncol=3, prop={'size':8})
+    axes[2].set_xlim(xlim)
+
     
     #plot the PDC curve
     
@@ -469,8 +503,10 @@ def plot_fit(kid, quarter, l2, offset, num, pixel_num, poly, ccd, target_flux, t
     axes[3].yaxis.tick_right()
     axes[3].set_ylabel("pdc flux")
     axes[3].set_xlabel("time [BKJD]")
-    axes[3].text(time[2000], 1.0006, 'S/N = %.3f'%pdc_sn)
+    axes[3].text(time[500], 1.0006, 'S/N = %.3f'%pdc_sn)
     axes[3].legend(loc=1, ncol=3, prop={'size':8})
+    axes[3].set_xlim(xlim)
+
 
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
                         wspace=0, hspace=0)
@@ -566,7 +602,7 @@ if __name__ == "__main__":
         kid = 5088536
         quarter = 5
         offset = 0
-        total_num = 105
+        total_num = 300
         filter_num = 108
         l2 = 1e5
         ccd = True
@@ -576,16 +612,16 @@ if __name__ == "__main__":
         auto_window = 0
         margin = 12
         thread_num = 4
-        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d_transitpart_near'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, margin)
+        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d_part1'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, margin)
         rms = False
         
         koi_num = 282.01
         
         target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, total_num, offset=0, ccd=True)
         
-        neighor_tpfs = preprocess.filter(target_tpf, neighor_tpfs, 200, rms, filter_num)
+        #neighor_tpfs = preprocess.filter(target_tpf, neighor_tpfs, 400, rms, filter_num)
         
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window)
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window, 1)
         
         whole_time = np.zeros_like(epoch_mask, dtype=float)
         whole_time[epoch_mask>0] = np.float64(time)
@@ -593,13 +629,11 @@ if __name__ == "__main__":
         
         fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask, covar_list, margin, l2_vector, thread_num, prefix, transit_mask)
         
-        t = tm.time()
+        #plot_transit_part(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, auto, auto_offset, auto_window, transit_mask)
+    
+        plot_fit(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
 
-        plot_transit_part(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, auto, auto_offset, auto_window, transit_mask)
-
-        #plot_fit(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, koi_num)
-
-    if True:
+    if False:
         kid = 5088536
         quarter = 5
         offset = 0
@@ -629,15 +663,15 @@ if __name__ == "__main__":
         covar_list = covar_list[:, target_kplr_mask==3]
         covar = np.mean(covar_list, axis=1)**2
 
-        l2_list = np.arange(8)
-        num_list = (np.arange(5)+8)*10
-        window_list = (np.arange(5)+1)*12
+        l2_list = np.arange(3)+4
+        num_list = (np.arange(8)+32)*10
+        window_list = (np.arange(1))*12
 
-        f = open('./k_fold_optimization/lightcurve_optimize.log', 'w')
+        f = open('./k_fold_optimization/lightcurve_optimize2.log', 'w')
         for total_num in num_list:
             tmp_target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, total_num, offset=0, ccd=True)
             for auto_window in window_list:
-                neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, 1., poly, auto, auto_offset, auto_window)
+                neighor_flux_matrix, tmp_target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, 1., poly, auto, auto_offset, auto_window)
                 for l2 in l2_list:
                     l2 = math.pow(10, l2)
                     tmp_l2_vector = l2_vector*l2
@@ -653,9 +687,10 @@ if __name__ == "__main__":
                         rms = np.sqrt(np.mean(dev**2, axis=0))
                         mean_rms += rms
                     mean_rms /= k
-                    f.write('%d\t%d\t%e\t%.8f\n'%(total_num, auto_window, l2, mean_rms))
+                    f.write('%d\t%d\t%e\t%.8e\n'%(total_num, auto_window, l2, mean_rms))
                     print (total_num, auto_window, l2, mean_rms)
         f.close()
+
 
 
 
