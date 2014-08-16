@@ -15,8 +15,10 @@ def filter(target_tpf, neighor_tpfs, distance, rms=False, num=0):
 
     for key, tpf in neighor_tpfs.items():
         time, flux, pixel_mask, kplr_mask, epoch_mask, flux_err, column, row = mnf.load_data(tpf)
-        dis_square = (target_row-row)**2+(target_column-column)**2
-        if dis_square < distance**2:
+        x_dis_square = (target_row-row)**2
+        y_dis_square = (target_column-column)**2
+        dis_square = x_dis_square+y_dis_square
+        if dis_square < distance**2 or x_dis_square<5**2 or y_dis_square<5**2 :
             continue
         elif not rms:
             tpfs[key] = tpf
