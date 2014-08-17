@@ -181,7 +181,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
         print (fit_epoch_mask.shape, fit_time.shape, fit_target_flux.shape, flux_err.shape, neighor_flux_matrix.shape)
         '''
     else:
-        data_mask = 1
+        data_mask[:] = 1
 
     #add auto-regression terms
     if auto:
