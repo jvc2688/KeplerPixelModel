@@ -184,7 +184,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
         data_mask[:] = 1
 
     #add auto-regression terms
-    if auto:
+    if auto and (window != 0):
         tmp_target_kplr_mask = target_kplr_mask.flatten()
         tmp_target_kplr_mask = tmp_target_kplr_mask[tmp_target_kplr_mask>0]
         auto_flux = target_flux[:, tmp_target_kplr_mask==3]
@@ -192,7 +192,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
             neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, i, axis=0)), axis=1)
             neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, -i, axis=0)), axis=1)
         data_mask[0:offset+window] = 0
-        data_mask[-offset+window:] = 0
+        data_mask[-offset-window:] = 0
 
     #remove bad time point based on simulteanous epoch mask
     co_mask = data_mask*epoch_mask
