@@ -135,16 +135,21 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
 
     neighor_kid, neighor_fluxes, neighor_pixel_maskes, neighor_kplr_maskes = [], [], [], []
 
-    for key, tpf in neighor_tpfs.items():
-        neighor_kid.append(key)
-        tmpResult = load_data(tpf)
-        neighor_fluxes.append(tmpResult[1])
-        neighor_pixel_maskes.append(tmpResult[2])
-        neighor_kplr_maskes.append(tmpResult[3])
-        epoch_mask *= tmpResult[4]
-    
     #construt the neighor flux matrix
-    neighor_flux_matrix = np.float64(np.concatenate(neighor_fluxes, axis=1))
+    if neighor_tpfs:
+        for key, tpf in neighor_tpfs.items():
+            neighor_kid.append(key)
+            tmpResult = load_data(tpf)
+            neighor_fluxes.append(tmpResult[1])
+            neighor_pixel_maskes.append(tmpResult[2])
+            neighor_kplr_maskes.append(tmpResult[3])
+            epoch_mask *= tmpResult[4]
+        neighor_flux_matrix = np.float64(np.concatenate(neighor_fluxes, axis=1))
+        print neighor_flux_matrix.shape
+    else:
+        neighor_flux_matrix = np.array([])
+        print neighor_flux_matrix.size
+
     target_flux = np.float64(target_flux)
 
     epoch_len = epoch_mask.shape[0]
@@ -171,15 +176,6 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
         split_point.append(epoch_len)
         print split_point
         data_mask[split_point[part-1]:split_point[part]] = 1
-        '''
-        fit_epoch_mask =  np.split(fit_epoch_mask, split_point)[part-1]
-        fit_time = np.split(time, split_point)[part-1]
-        fit_target_flux = np.split(target_flux, split_point, axis=0)[part-1]
-        flux_err = np.split(flux_err, split_point, axis=0)[part-1]
-        neighor_flux_matrix = np.split(neighor_flux_matrix, split_point, axis=0)[part-1]
-
-        print (fit_epoch_mask.shape, fit_time.shape, fit_target_flux.shape, flux_err.shape, neighor_flux_matrix.shape)
-        '''
     else:
         data_mask[:] = 1
 
@@ -189,10 +185,14 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
         tmp_target_kplr_mask = tmp_target_kplr_mask[tmp_target_kplr_mask>0]
         auto_flux = target_flux[:, tmp_target_kplr_mask==3]
         for i in range(offset+1, offset+window+1):
-            neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, i, axis=0)), axis=1)
-            neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, -i, axis=0)), axis=1)
-        data_mask[0:offset+window] = 0
-        data_mask[-offset-window:] = 0
+            if neighor_flux_matrix.size != 0:
+                neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, i, axis=0)), axis=1)
+                neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, -i, axis=0)), axis=1)
+            else:
+                neighor_flux_matrix = np.roll(auto_flux, i, axis=0)
+                neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, -i, axis=0)), axis=1)
+        data_mask[0:offset+window+1] = 0
+        data_mask[-offset-window-1:] = 0
 
     #remove bad time point based on simulteanous epoch mask
     co_mask = data_mask*epoch_mask
@@ -202,29 +202,6 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
     neighor_flux_matrix = neighor_flux_matrix[co_mask>0, :]
 
     print neighor_flux_matrix.shape
-    '''
-    #add autoregression terms
-    if auto:
-        epoch_len = epoch_mask.shape[0]
-        tmp_target_kplr_mask = target_kplr_mask.flatten()
-        tmp_target_kplr_mask = tmp_target_kplr_mask[tmp_target_kplr_mask>0]
-        target_len = np.sum(tmp_target_kplr_mask==3)
-        print target_len
-        auto_flux = np.zeros((epoch_len, target_len))
-        #auto_flux[epoch_mask>0] = inter_target_flux[:, tmp_target_kplr_mask==3]
-        auto_flux = inter_target_flux[:, tmp_target_kplr_mask==3]
-        auto_pixel = np.zeros((epoch_len, 2*window*target_len))
-        auto_len = window*target_len
-        for i in range(offset+window, epoch_len-window-offset):
-            auto_pixel[i, 0:auto_len] = auto_flux[i-offset-window:i-offset, :].flatten()
-            auto_pixel[i, auto_len:2*auto_len] = auto_flux[i+offset+1:i+offset+window+1].flatten()
-        for i in range(0, offset+window):
-            auto_pixel[i, auto_len:2*auto_len] = auto_flux[i+offset+1:i+offset+window+1].flatten()
-        for i in range(epoch_len-window-offset, epoch_len):
-            auto_pixel[i, 0:auto_len] = auto_flux[i-offset-window:i-offset].flatten()
-        auto_pixel = auto_pixel[epoch_mask>0, :]
-        neighor_flux_matrix = np.concatenate((neighor_flux_matrix, auto_pixel), axis=1)
-    '''
 
     #construct l2 vectors
     pixel_num = neighor_flux_matrix.shape[1]
@@ -631,7 +608,8 @@ if __name__ == "__main__":
         auto_window = 0
         margin = 12
         thread_num = 4
-        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d_part1'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, margin)
+        part = 1
+        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d_part%r'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, margin, part)
         rms = False
         
         koi_num = 282.01
@@ -640,7 +618,7 @@ if __name__ == "__main__":
         
         #neighor_tpfs = preprocess.filter(target_tpf, neighor_tpfs, 400, rms, filter_num)
         
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window, 1, 1)
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window, 1, part)
         
         #transit_mask = get_transit_mask(koi_num, time, epoch_mask, 3*24*2)
         transit_mask = None
