@@ -1,0 +1,29 @@
+\documentclass[12pt, preprint]{aastex}
+
+\newcommand{\project}[1]{\textsl{#1}}
+\newcommand{\Kepler}{\project{Kepler}}
+\newcommand{\name}{CPM}
+
+\begin{document}
+
+\title{AAS Abstract}
+
+The precision of \Kepler\ photometry for exoplanet science---the most
+precise photometric measurements of stars ever made---appears to be
+limited by unknown or untracked variations in spacecraft pointing and
+temperature, and unmodeled stellar variability.
+To exploit all the information of the \Kepler\ data, here we present \name, 
+a pixel level data-driven model intended to model all these variations(or really of their impact on the photometry) and preserve transit signals.
+Importantly (and uniquely),
+  \name\ works at the pixel level (not the photometric measurement level);
+  it can capture more fine-grained information about the variation of the spacecraft
+  (especially regarding pointing and point-spread function)
+  than is available in the pixel-summed photometry. 
+With the help of L2-regularization, \name\ predicts the target pixel value by linearly combining large number of pixels from other stars that share the imstrument vaiabilities. 
+To preserve the transit signals, we adopt the train-and-test framework, with which information of the transit will be perfectly isolated from the model. 
+We optimize the model by cross-validating over four hyper-parameters---number of predictor stars, strength of L2-regularization, size of auto-regressive compoents and the strength of auto-regressive L2-regularization.
+After examining numbers of target stars, we make a general set of hyper-parameters that works quite well on most of the stars with Kepler-band magnitude around 11-12. 
+To show the advantages of \name,  a set of target stars with planet-transits are choosed, \name\ can always outperform the \Kepler\ Presearch Data Conditioning method,
+with higher S/N(signal to noise ratio).
+
+\end{document}
