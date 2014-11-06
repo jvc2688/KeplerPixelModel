@@ -28,6 +28,8 @@ def find_mag_neighor(kic, quarter, num, offset=0, ccd=True):
     - `tpfs` - tpfs of stars that are closet to the target star in magnitude
     """
     target_tpf = client.target_pixel_files(ktc_kepler_id=kic, sci_data_quarter=quarter, ktc_target_type="LC")[0]
+    target_row, target_column = load_header(target_tpf)
+    print target_row, target_column
     
     if ccd:
         stars_over = client.target_pixel_files(ktc_kepler_id="!=%d"%target_tpf.ktc_kepler_id, kic_kepmag=">=%f"%target_tpf.kic_kepmag, sci_data_quarter=target_tpf.sci_data_quarter, sci_channel=target_tpf.sci_channel, sort=("kic_kepmag", 1),ktc_target_type="LC", max_records=num+offset)
@@ -43,8 +45,14 @@ def find_mag_neighor(kic, quarter, num, offset=0, ccd=True):
     dtype = [('kic', int), ('bias', float), ('tpf', type(target_tpf))]
     neighor_list = []
     tpf_list = stars_over+stars_under
+
+    #exclude nearby stars
     for tpf in tpf_list:
-        neighor_list.append((tpf.ktc_kepler_id, math.fabs(tpf.kic_kepmag-target_kepmag), tpf))
+        kic = tpf.ktc_kepler_id
+        tmp_row, tmp_column = load_header(tpf)
+        if (tmp_row-target_row)**2+(tmp_column-target_column)**2 > 400:
+            neighor_list.append((tpf.ktc_kepler_id, math.fabs(tpf.kic_kepmag-target_kepmag), tpf))
+    print len(neighor_list)
 
     neighor_list = np.array(neighor_list, dtype=dtype)
     neighor_list = np.sort(neighor_list, order='bias')
@@ -68,6 +76,14 @@ def get_epoch_mask(pixel_mask):
     epoch_mask = np.zeros_like(foo)
     epoch_mask[(foo > 0)] = 1
     return epoch_mask
+
+#help function to load header from tpf
+def load_header(tpf):
+    with tpf.open() as file:
+        meta = file[1].header
+        column = meta['1CRV4P']
+        row = meta['2CRV4P']
+    return row,column
 
 #help function to load data from tpf
 def load_data(tpf):
@@ -98,12 +114,85 @@ def load_data(tpf):
     
     return time, flux, pixel_mask, kplr_mask, epoch_mask, flux_err, column, row
 
+def predictor_filter(predictor, num):
+	total = predictor.shape[1]
+	if total >= num:
+		select_mask = np.zeros(total)
+		select = random.sample(xrange(0, total), num)
+		for i in select:
+			select_mask[i] = 1
+		predictor = predictor[:, select_mask>0]
+	return predictor
+	
+def predictor_filter_bin(predictor, num, bin_num=5):
+    total = predictor.shape[1]
+    if total > num:
+        count = []
+        predictor_mean = np.mean(predictor, axis=0)
+        count, bins = np.histogram(predictor_mean, bin_num)
+        indices = np.digitize(predictor_mean, bins)
+        max_indice = np.argmax(predictor_mean)
+        if indices[max_indice] > bin_num:
+            indices[max_indice] = bin_num
+        select_mask = np.arange(total)
+        select = np.zeros(total, dtype=int)
+        bin_list = np.arange(bin_num)+1
+        bin_list = bin_list[count>0]
+        count = count[count>0]
+        print bin_list
+        print count
+        bin_num = bin_list.shape[0]
+        remain = num
+        while remain>0:
+            sample_num = remain//bin_num
+            min = np.min(count)
+            pend_select = np.array([], dtype=int)
+            if sample_num == 0:
+                pend_select = np.concatenate((pend_select, random.sample(select_mask, remain)))
+                remain -= remain
+            else:
+                if min<sample_num:
+                    sample_num = min
+                print sample_num
+                for i in bin_list:
+                    pend_select = np.concatenate((pend_select, random.sample(select_mask[indices==i], sample_num)))
+                remain -= sample_num*bin_num
+                count -= sample_num
+                bin_list =  bin_list[count>0]
+                count = count[count>0]
+                bin_num = bin_list.shape[0]
+            print pend_select
+            select_old = np.copy(select)
+            for i in pend_select:
+                select[i] = 1
+            print select
+            tmp_select = select[select_old<1]
+            print select_old
+            print tmp_select
+            print select_mask
+            select_mask = select_mask[tmp_select<1]
+            indices = indices[tmp_select<1]
+            print select_mask
+        predictor = predictor[:, select>0]
+        print remain
+    print predictor.shape
+    return predictor
+
+
 def get_kfold_train_mask(length, k, rand=False):
     train_mask = np.ones(length, dtype=int)
-    if random:
-        for i in range(0, length):
+    num_sequence = length//25
+    if rand:
+        for i in range(0, num_sequence):
             group = random.randint(0, k-1)
-            train_mask[i] = group
+            train_mask[i*25:(i+1)*25] = group
+            train_mask[i*25+12] = group+k
+        group = random.randint(0, k-1)
+        train_mask[num_sequence*25:] = group
+        if length - num_sequence*25>12:
+            train_mask[num_sequence*25+12] = group+k
+        else:
+            train_mask[-1] = group+k
     else:
         step = length//k
         for i in range(0, k-1):
@@ -156,6 +245,10 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
     data_mask = np.zeros(epoch_len, dtype=int)
 
     print neighor_flux_matrix.shape
+    #construct l2 vectors
+    pixel_num = neighor_flux_matrix.shape[1]
+    auto_pixel_num = 0
+    l2_vector = np.ones(pixel_num, dtype=float)*l2
 
     #spilt lightcurve
     if part is not None:
@@ -170,12 +263,15 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
                 j = i+1
                 while j<epoch_len and epoch_mask[j] == 0:
                     j += 1
-                if j-i > 30:
+                if j-i > 30 and j-split_point[-1] > 1200:
+                    split_point.append(i)
                     split_point.append(j)
                 i = j
         split_point.append(epoch_len)
         print split_point
-        data_mask[split_point[part-1]:split_point[part]] = 1
+        start = split_point[2*(part-1)]+offset+window
+        end = split_point[2*(part-1)+1]-offset-window+1
+        data_mask[start:end] = 1
     else:
         data_mask[:] = 1
 
@@ -191,8 +287,10 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
             else:
                 neighor_flux_matrix = np.roll(auto_flux, i, axis=0)
                 neighor_flux_matrix = np.concatenate((neighor_flux_matrix, np.roll(auto_flux, -i, axis=0)), axis=1)
-        data_mask[0:offset+window+1] = 0
-        data_mask[-offset-window-1:] = 0
+        data_mask[0:offset+window] = 0
+        data_mask[-offset-window:] = 0
+        auto_pixel_num = neighor_flux_matrix.shape[1] - pixel_num
+        l2_vector = np.concatenate((l2_vector, np.ones(auto_pixel_num, dtype=float)*auto_l2), axis=0)
 
     #remove bad time point based on simulteanous epoch mask
     co_mask = data_mask*epoch_mask
@@ -202,10 +300,6 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
     neighor_flux_matrix = neighor_flux_matrix[co_mask>0, :]
 
     print neighor_flux_matrix.shape
-
-    #construct l2 vectors
-    pixel_num = neighor_flux_matrix.shape[1]
-    l2_vector = np.ones(pixel_num, dtype=float)*l2
 
     #add polynomial terms
     if poly is not None:
@@ -218,7 +312,7 @@ def get_fit_matrix(target_tpf, neighor_tpfs, l2,  poly=0, auto=False, offset=0, 
 
     print neighor_flux_matrix.shape
 
-    return neighor_flux_matrix, target_flux, flux_err, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num
+    return neighor_flux_matrix, target_flux, flux_err, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num, auto_pixel_num
 
 def get_transit_mask(koi, time, epoch_mask, measure_half_len):
     #get the transit information of the corressponding koi
@@ -598,61 +692,62 @@ if __name__ == "__main__":
         kid = 5088536
         quarter = 5
         offset = 0
-        total_num = 300
+        total_num = 150
         filter_num = 108
         l2 = 1e5
         ccd = True
-        auto = False
+        auto = True
+        auto_l2 = 1e5
         poly = 0
-        auto_offset = 0
-        auto_window = 0
+        auto_offset = 12
+        auto_window = 3
         margin = 12
-        thread_num = 4
-        part = 1
-        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d_margin%d_part%r'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, margin, part)
+        part = 2
+        thread_num = 1
+        prefix = 'kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d-%.0e_margin%d_part%d_filter_bin'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, auto_l2, margin, part)
         rms = False
         
         koi_num = 282.01
         
         target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, total_num, offset=0, ccd=True)
         
-        #neighor_tpfs = preprocess.filter(target_tpf, neighor_tpfs, 400, rms, filter_num)
-        
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window, 1, part)
-        
-        #transit_mask = get_transit_mask(koi_num, time, epoch_mask, 3*24*2)
-        transit_mask = None
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num, auto_pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window, auto_l2, part)
         
         fit_target(target_flux, target_kplr_mask, neighor_flux_matrix, time, epoch_mask[data_mask>0], covar_list, margin, l2_vector, thread_num, prefix, transit_mask)
-        
-        #plot_transit_part(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, time, margin, prefix, auto, auto_offset, auto_window, transit_mask)
     
         plot_fit(kid, quarter, l2, offset, total_num, pixel_num, poly, ccd, target_flux, target_kplr_mask, epoch_mask, data_mask, time, margin, prefix, koi_num)
 
+    #continue no rand
     if False:
-        kid = 5088536
+        kid = 11512246
         quarter = 5
         offset = 0
         total_num = 1
-        filter_num = 108
         l2 = 1e5
+        auto_l2 = 0
         ccd = True
-        auto = False
+        auto = True
         poly = 0
-        auto_offset = 0
+        auto_offset = 12
         auto_window = 0
         rms = False
         
         koi_num = 282.01
 
-        k = 10
-        
+        margin = 12
+        part = 2
         target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, total_num, offset=0, ccd=True)
-        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window, 1, 1)
+        neighor_flux_matrix, target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num, auto_pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, l2, poly, auto, auto_offset, auto_window, auto_l2, part)
         
-        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, True)
+        k = neighor_flux_matrix.shape[0]//(margin*2+1)
+        print k
+        
+        kfold_mask = get_kfold_train_mask(neighor_flux_matrix.shape[0], k, False)
+        
+        print kfold_mask
         
         target_kplr_mask = target_kplr_mask.flatten()
+        print target_kplr_mask
         target_kplr_mask = target_kplr_mask[target_kplr_mask>0]
         
         optimal_len = np.sum(target_kplr_mask==3)
@@ -662,36 +757,59 @@ if __name__ == "__main__":
         covar_list = covar_list[:, target_kplr_mask==3]
         covar = np.mean(covar_list, axis=1)**2
         
-        l2_list = np.arange(3)+4
-        num_list = (np.arange(7)+1)*100
-        window_list = (np.arange(1))*2
-
-        f = open('./k_fold_optimization/lightcurve_optimize_30_part1_large.log', 'w')
+        auto_l2_list = np.arange(2)*5
+        l2_list = np.arange(4)+4
+        window_list = (np.arange(4))*3
+        num_list = (np.arange(4)+1)*60
+        
+        total = 2*4*4*4
+        erro_list = np.zeros(total, dtype=float)
+        print erro_list.shape
+        erro_list = erro_list.reshape((2, 4, 4, 4))
+        prefix = 'kic%d/k_fold_optimization/lightcurve%d_quarter%d_optimize_30_part%d_margin_%d'%(kid, kid, quarter, part, margin)
+        filename = "./%s"%prefix
+        dir = os.path.dirname(filename)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        d = 0
         for total_num in num_list:
             tmp_target_tpf, neighor_tpfs = find_mag_neighor(kid, quarter, total_num, offset=0, ccd=True)
+            c = 0
             for auto_window in window_list:
-                neighor_flux_matrix, tmp_target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, 1., poly, auto, auto_offset, auto_window, 1, 1)
-                f.write('%d\t'%total_num)
-                #neighor_flux_matrix = neighor_flux_matrix[reduced_transit_mask<2]
+                neighor_flux_matrix, tmp_target_flux, covar_list, time, neighor_kid, neighor_kplr_maskes, tmp_target_kplr_mask, epoch_mask, data_mask, l2_vector, pixel_num, auto_pixel_num = get_fit_matrix(target_tpf, neighor_tpfs, 1., poly, auto, auto_offset, auto_window, auto_l2, part)
+                b = 0
                 for l2 in l2_list:
                     l2 = math.pow(10, l2)
-                    tmp_l2_vector = l2_vector*l2
-                    mean_rms = 0
-                    for i in range(0, k):
-                        tmp_covar = covar[kfold_mask!=i]
-                        result = lss.linear_least_squares(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i,:], tmp_covar, tmp_l2_vector)
-                        fit_flux = np.dot(neighor_flux_matrix[kfold_mask==i, :], result)
-                        fit_lightcurve = np.sum(fit_flux, axis=1)
-                        lightcurve = np.sum(target_flux[kfold_mask==i, :], axis=1)
-                        ratio = np.divide(lightcurve, fit_lightcurve)
-                        dev = ratio - 1.0
-                        rms = np.sqrt(np.mean(dev**2, axis=0))
-                        mean_rms += rms
-                    mean_rms /= k
-                    f.write('%.8e\t'%mean_rms)
-                    print (total_num, auto_window, l2, mean_rms)
-                f.write('\n')
-        f.close()
+                    star_l2_vector = np.ones(pixel_num, dtype=float)*l2
+                    a = 0
+                    for auto_l2 in auto_l2_list:
+                        if auto_window == 0 and a != 0:
+                            erro_list[a, b, c, d] = erro_list[0, b, c, d]
+                        else:
+                            auto_l2 = math.pow(10, auto_l2)
+                            total_l2_vector = np.concatenate((star_l2_vector, np.ones(auto_pixel_num, dtype=float)*auto_l2), axis=0)
+                            total_l2_vector = np.concatenate((total_l2_vector, np.ones(poly+1, dtype=float)), axis=0)
+                            mean_rms = 0
+                            for i in range(0, k):
+                                tmp_covar = covar[kfold_mask!=i]
+                                result = lss.linear_least_squares(neighor_flux_matrix[kfold_mask!=i, :], target_flux[kfold_mask!=i], tmp_covar, total_l2_vector)
+                                fit_flux = np.dot(neighor_flux_matrix[kfold_mask==i, :], result)
+                                fit_lightcurve = np.sum(fit_flux, axis=1)
+                                lightcurve = np.sum(target_flux[kfold_mask==i, :], axis=1)
+                                ratio = np.divide(lightcurve, fit_lightcurve)
+                                dev = ratio - 1.0
+                                rms = np.sqrt(np.mean(dev**2, axis=0))
+                                mean_rms += rms
+                            mean_rms /= k
+                            erro_list[a, b, c, d] = mean_rms
+                        a += 1
+                        print (total_num, auto_window, l2, auto_l2, mean_rms)
+                    b += 1
+                c += 1
+            d += 1
+            np.save('./%s.npy'%prefix, erro_list)
+
+
 
 
 
