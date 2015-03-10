@@ -1,0 +1,12 @@
+.DS_Store
+*.pyc
+*~
+*.aux
+*.log
+*.pkl
+*.out
+*.bbl
+*.blg
+*.pdf
+*.png
+TSWLatexianTemp*
