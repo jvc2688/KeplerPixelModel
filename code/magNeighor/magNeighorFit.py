@@ -8,6 +8,7 @@ import os
 import math
 import h5py
 import sys
+import wavelet_ml as wml
 
 client = kplr.API()
 
@@ -1488,3 +1489,130 @@ if __name__ == "__main__":
 
         plt.savefig('tow_stars.png', dpi=190)
         plt.clf()
+
+    if True:
+        print 'inject'
+        kid = 8846139
+        quarter = 5
+        offset = 0
+        total_num = 160
+        filter_num = 108
+        l2 = 1e5
+        auto_l2 = 1e5
+        ccd = True
+        auto = True
+        poly = 0
+        auto_offset = 18
+        auto_window = 3
+        margin = 18
+        thread_num = 3
+        part = 1
+        distort_len = 16
+        distort_str = 0.0002
+        cpm_str = []
+        fit_str = []
+
+        signal = 0
+        data_masks = []
+        signal_masks = []
+        measure_masks = []
+        all_ratio = []
+        for part in range(1,4):
+            prefix = 'inject/kic%d/lightcurve_%d_q%d_num%d-%d_reg%.0e_poly%r_auto%r-%d-%d-%.0e_margin%d_part%r_default_pixel'%(kid, kid, quarter, offset+1, total_num, l2, poly, auto, auto_offset, auto_window, auto_l2, margin, part)
+            tmp_time, tmp_target_lightcurve, tmp_fit_lightcurve, tmp_ratio = get_hd5_info(prefix, None, False)
+            all_ratio.append(tmp_ratio)
+            f = h5py.File('%s.hdf5'%prefix,'a')
+            cpm_info = f['/cpm_info']
+            signal_mask = cpm_info['signal_mask'][:] 
+            if 'measure_mask' in cpm_info.keys():
+                print 'exist'
+            else:
+                measure_mask = np.zeros(signal_mask.shape[0])
+                for i in range(measure_mask.shape[0]-1):
+                    now = signal_mask[i]
+                    next = signal_mask[i+1]
+                    if next>now:
+                        measure_mask[i-3*24*2+1:i+1] = 1
+                    elif next<now:
+                        measure_mask[i+1:i+3*24*2+1] = 1
+                cpm_info['measure_mask'] = measure_mask
+            f.close()
+
+            f = h5py.File('%s.hdf5'%prefix,'r')
+            cpm_info = f['/cpm_info']
+            signal_mask = cpm_info['signal_mask'][:] 
+            measure_mask = cpm_info['measure_mask'][:]
+            measure_masks.append(measure_mask)
+            signal_masks.append(signal_mask)
+
+            data_group = f['/data']
+            
+            epoch_mask = data_group['epoch_mask'][:]
+            data_mask = data_group['data_mask'][:]
+            data_masks.append(data_mask)
+            tmp_ratio = tmp_ratio-1.
+            tmp_signal = np.mean(tmp_ratio[signal_mask[epoch_mask[data_mask>0]>0]>0])-np.mean(tmp_ratio[measure_mask[epoch_mask[data_mask>0]>0]>0])
+            print tmp_signal
+            signal += tmp_signal
+            f.close()
+        total_ratio = np.concatenate(all_ratio, axis=0)
+        signal_mask = np.concatenate(signal_masks, axis=0)
+        measure_mask = np.concatenate(measure_masks, axis=0)
+        print -signal/3.
+        signal = -signal/3.
+
+        rms_cdpp_3, rms_cdpp_6, rms_cdpp_12 = wml.get_cdpp_ml(total_ratio)
+        print rms_cdpp_12
+
+        pdc_signal_list = []
+        pdc_cdpp_list = []
+        win_list = [12, 24, 48, 60, 72, 96]
+        for win_size in [25, 49, 97, 121, 145, 193]:
+            lc = client.light_curves(ktc_kepler_id=kid, sci_data_quarter=quarter, ktc_target_type="LC")[0]
+            data = lc.read()
+            flux = data["PDCSAP_FLUX"]
+
+            data_mask = np.sum(data_masks, axis=0)
+
+            pdc_flux = flux[data_mask>0]
+            #pdc_flux = np.concatenate(pdc_fluxes, axis=0)
+            pdc_flux[signal_mask>0] = pdc_flux[signal_mask>0]*(1-distort_str)
+            inds = np.isfinite(pdc_flux)
+            pdc_flux = pdc_flux[inds]
+            flux_m = medfilt(pdc_flux, kernel_size=win_size)
+            flux_new = pdc_flux/flux_m
+            flux_new = flux_new/np.median(flux_new)-1.
+            pdc_cdpp =  wml.get_cdpp_ml(flux_new)
+            print pdc_cdpp
+            pdc_signal = np.mean(flux_new[signal_mask[inds]>0])-np.mean(flux_new[measure_mask[inds]>0])
+            print -pdc_signal
+            pdc_cdpp_list.append(pdc_cdpp[2])
+            pdc_signal_list.append(-pdc_signal*10**6)
+            #pdc_signal_list.append(-pdc_signal)
+
+        f, axes = plt.subplots(2, 1)
+
+        axes[0].set_ylabel('RMS CDPP[PPM]')
+        plt.setp( axes[0].get_xticklabels(), visible=False)
+        #plt.setp( axes[0].get_yticklabels(), visible=False)
+
+        axes[0].text(0.75, 0.85, 'KIC %d'%(kid), transform=axes[0].transAxes, fontsize=12,
+        verticalalignment='top')
+        axes[0].plot(win_list, pdc_cdpp_list, 'o-')
+        #axes[0].axhline(y=26.320209851124762,xmin=0,xmax=5, ls='--', c="r",linewidth=1,zorder=10, alpha=1)
+        axes[0].axhline(y=rms_cdpp_12,xmin=0,xmax=5, ls='--', c="r",linewidth=1,zorder=10, alpha=1)
+
+        axes[1].plot(win_list, pdc_signal_list, 'o-')
+        axes[1].set_ylim(70, 230)
+        axes[1].set_ylabel('Signal[PPM]')
+        axes[1].set_xlabel('Median filter size[hours]')
+
+
+        axes[1].axhline(y=signal*10**6,xmin=0,xmax=5, ls='--', c="r",linewidth=1,zorder=10, alpha=1)
+        axes[1].axhline(y=200,xmin=0,xmax=5, ls='--', c="grey",linewidth=1,zorder=10, alpha=1)
+
+        plt.subplots_adjust(left=None, bottom=None, right=None, top=None,
+                    wspace=0, hspace=0)
+        plt.savefig('distort/distortion_%d_%d.eps'%(kid, 200), dpi=190)
+        plt.clf()
+
